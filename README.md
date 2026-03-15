@@ -1,80 +1,65 @@
 # Research Dataset Builder
 
-## 🎉 Status: COMPLETE AND PRODUCTION-READY!
-
-A platform that enables biomedical researchers to generate structured, analysis-ready datasets from fragmented multimodal data sources using natural language or structured queries.
-
-### ✅ Implementation Complete
-- **Backend**: 100% complete (10 core services, 8 API endpoints)
-- **Frontend**: 100% complete (4 UI components, full authentication)
-- **Security**: 100% complete (encryption, TLS, key management)
-- **Documentation**: 100% complete (8 comprehensive guides)
-- **Testing**: Procedures documented and ready
+A platform that enables biomedical researchers to generate structured, analysis-ready datasets from multimodal clinical data sources using natural language queries.
 
 ## Features
 
-- ✅ Natural language query interface powered by LLM
-- ✅ Multi-source data integration (EHR/FHIR, REDCap, CSV, imaging)
-- ✅ Canonical research schema for data standardization
-- ✅ Reproducible query generation with complete provenance
-- ✅ HIPAA-compliant security and audit logging
-- ✅ Multiple export formats (CSV, Parquet, JSON)
-- ✅ Real-time query processing with confidence scoring
-- ✅ Dataset explorer with pagination and metadata
-- ✅ JWT authentication with automatic token refresh
-- ✅ Role-based access control (4 roles)
+- Natural language query interface (LLM-powered with demo mode fallback)
+- Multi-source data integration (EHR/FHIR, CSV upload, imaging metadata)
+- Canonical research schema for data standardization
+- Reproducible query generation with complete provenance
+- HIPAA-compliant audit logging with integrity checksums
+- Multiple export formats (CSV, Parquet, JSON)
+- Confidence scoring with clarification requests
+- Dataset explorer with pagination and metadata
+- JWT authentication with automatic token refresh
+- Role-based access control (Admin, Researcher, Data_Analyst, Read_Only)
 
 ## Architecture
 
-- **Frontend**: Next.js 14 with TypeScript and Tailwind CSS
-- **Backend**: FastAPI with Python 3.11
-- **Databases**: PostgreSQL (metadata) + DuckDB (analytics)
-- **LLM Integration**: OpenAI or Anthropic for natural language parsing
+- **Frontend**: Next.js 16 / React 19, TypeScript, TailwindCSS, TanStack Query
+- **Backend**: FastAPI, Python 3.11
+- **Databases**: SQLite (metadata) + DuckDB (analytics warehouse)
+- **Auth**: JWT (python-jose) + bcrypt password hashing
+- **LLM**: OpenAI or Anthropic (optional — demo mode works without API keys)
 
-## Getting Started
+## Quick Start
 
-### Prerequisites
-
-- Docker and Docker Compose
-- Node.js 18+ (for local frontend development)
-- Python 3.11+ (for local backend development)
-
-### Quick Start with Docker
-
-1. Clone the repository
-2. Copy environment files:
-   ```bash
-   cp backend/.env.example backend/.env
-   ```
-3. Update `.env` with your configuration (API keys, etc.)
-4. Start services:
-   ```bash
-   docker-compose up -d
-   ```
-5. Access the application:
-   - Frontend: http://localhost:3000
-   - Backend API: http://localhost:8000
-   - API Docs: http://localhost:8000/docs
-
-### Local Development
-
-#### Backend
+### Option 1: Automated Setup
 
 ```bash
-cd backend
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
+chmod +x setup.sh
+./setup.sh
 ```
 
-#### Frontend
+Then follow the printed instructions, or:
 
 ```bash
+# Terminal 1 — backend
+cd backend
+python3 -m app.init_db
+python3 -m uvicorn app.main:app --reload --port 8000
+
+# Terminal 2 — frontend
 cd frontend
 npm install
-npm run dev
+npm run dev -- -p 3001
 ```
+
+Open **http://localhost:3001** and sign in:
+
+| Username     | Password       | Role       |
+|--------------|----------------|------------|
+| admin        | admin123       | Admin      |
+| researcher   | researcher123  | Researcher |
+
+### Option 2: Docker
+
+```bash
+docker-compose up --build
+```
+
+Open **http://localhost:3000**
 
 ## Project Structure
 
@@ -82,43 +67,78 @@ npm run dev
 .
 ├── backend/
 │   ├── app/
-│   │   ├── __init__.py
-│   │   ├── main.py           # FastAPI application
-│   │   ├── config.py         # Configuration settings
-│   │   ├── database.py       # Database connections
-│   │   ├── models/           # SQLAlchemy models
-│   │   ├── services/         # Business logic
-│   │   ├── api/              # API endpoints
-│   │   └── tests/            # Backend tests
+│   │   ├── main.py              # FastAPI application entry
+│   │   ├── config.py            # Settings (pydantic-settings)
+│   │   ├── database.py          # SQLite + DuckDB connections
+│   │   ├── init_db.py           # DB init + sample data + password migration
+│   │   ├── models/              # SQLAlchemy models
+│   │   ├── api/routes.py        # All 14 API endpoints
+│   │   └── services/            # Core business logic
+│   │       ├── auth.py          # JWT + bcrypt authentication
+│   │       ├── nl_parser.py     # Natural language → structured intent
+│   │       ├── query_planner.py # Intent → optimized query plan
+│   │       ├── query_validator.py # Read-only safety checks
+│   │       ├── cohort.py        # Patient cohort identification
+│   │       ├── dataset_assembly.py # Multi-source dataset assembly
+│   │       ├── export_engine.py # CSV/Parquet/JSON export
+│   │       ├── query_orchestrator.py # Full pipeline coordinator
+│   │       ├── fhir_connector.py # FHIR API integration
+│   │       ├── smart_schema_detector.py # Auto schema inference
+│   │       ├── schema_mapper.py # Schema transformation
+│   │       └── audit_log.py     # HIPAA audit logging
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   └── .env.example
 ├── frontend/
-│   ├── app/                  # Next.js app directory
-│   ├── components/           # React components
-│   ├── lib/                  # Utilities and API client
+│   ├── app/                     # Next.js app router (login, dashboard)
+│   ├── components/              # React components
+│   │   ├── chat-interface.tsx   # NL query input
+│   │   ├── dataset-explorer.tsx # Dataset preview + pagination
+│   │   ├── dataset-export.tsx   # Export format selection + download
+│   │   ├── data-upload.tsx      # CSV/Excel file upload
+│   │   └── ...
+│   ├── lib/                     # Auth context, API client, types
+│   ├── Dockerfile
 │   └── .env.local
 ├── docker-compose.yml
+├── setup.sh                     # One-time setup script
 └── README.md
 ```
 
-## Development Workflow
+## API Endpoints
 
-See `.kiro/specs/research-dataset-builder/tasks.md` for the complete implementation plan.
+| Method | Endpoint                          | Description                    |
+|--------|-----------------------------------|--------------------------------|
+| POST   | `/api/auth/login`                 | User login                     |
+| POST   | `/api/auth/logout`                | User logout                    |
+| POST   | `/api/auth/refresh`               | Refresh access token           |
+| GET    | `/api/auth/me`                    | Get current user info          |
+| POST   | `/api/query`                      | Submit natural language query   |
+| GET    | `/api/datasets`                   | List user's datasets           |
+| GET    | `/api/query/{id}/status`          | Check query status             |
+| GET    | `/api/dataset/{id}`               | Get dataset (rows + schema)    |
+| GET    | `/api/dataset/{id}/files`         | List export files              |
+| GET    | `/api/dataset/{id}/download`      | Download export file           |
+| POST   | `/api/upload`                     | Upload CSV/Excel data          |
+| GET    | `/api/tables`                     | List available tables          |
+| POST   | `/api/fhir/ingest`                | Trigger FHIR data ingestion    |
+| GET    | `/api/health`                     | Health check                   |
 
-## Testing
+## Sample Queries
 
-### Backend Tests
-```bash
-cd backend
-pytest
-```
+- "Find all Parkinson's patients"
+- "Parkinson's patients with DBS surgery"
+- "Patients over 65 with diabetes, include medication history"
+- "Subjects with MRI imaging features"
 
-### Frontend Tests
-```bash
-cd frontend
-npm test
-```
+## Environment Variables
+
+See `backend/.env.example` for all backend settings. Key variables:
+
+- `JWT_SECRET_KEY` — generated automatically by `setup.sh`
+- `LLM_PROVIDER` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` — optional, demo mode works without
+- `CORS_ORIGINS` — allowed frontend origins
+- `FHIR_BASE_URL` / `FHIR_AUTH_TOKEN` — optional FHIR integration
 
 ## License
 
