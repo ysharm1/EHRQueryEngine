@@ -1,4 +1,6 @@
-# Research Dataset Builder - Implementation Status
+# Research Dataset Builder - Implementation Status (Historical Snapshot)
+
+> **Note:** This document is a point-in-time snapshot from initial implementation. Refer to the codebase and README for current status.
 
 ## Overview
 The Research Dataset Builder MVP backend is now **fully implemented** with all core services, API endpoints, and database models complete.
