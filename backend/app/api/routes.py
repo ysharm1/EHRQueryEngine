@@ -719,13 +719,47 @@ async def list_tables(
 # Health Check Endpoint
 @router.get("/health", response_model=HealthResponse)
 async def health_check():
-    """
-    Health check endpoint.
-    
-    Implements basic health monitoring
-    """
+    """Health check endpoint."""
     return HealthResponse(
         status="healthy",
         timestamp=datetime.now().isoformat(),
         version="1.0.0"
+    )
+
+
+# ── Public Demo Endpoint (no auth required) ──────────────────────────────────
+@router.post("/demo/query")
+async def demo_query(
+    request: QuerySubmitRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Public demo endpoint — no authentication required.
+    Uses a fixed demo user so anyone can try the NL query engine.
+    """
+    nl_parser = NLParserService()
+    orchestrator = QueryOrchestrator(db, nl_parser)
+
+    try:
+        export_format = ExportFormat(request.output_format)
+    except ValueError:
+        export_format = ExportFormat.CSV
+
+    query_request = QueryRequest(
+        user_id="demo-user",
+        query_text=request.query_text,
+        data_source_ids=request.data_source_ids,
+        output_format=export_format,
+    )
+
+    response = orchestrator.process_query(query_request)
+
+    return QuerySubmitResponse(
+        dataset_id=response.dataset_id,
+        status=response.status.value,
+        row_count=response.row_count,
+        column_count=response.column_count,
+        download_urls=response.download_urls,
+        metadata=response.metadata,
+        error_message=response.error_message,
     )

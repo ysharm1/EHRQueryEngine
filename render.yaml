@@ -12,7 +12,7 @@ services:
       - key: DUCKDB_PATH
         value: /opt/render/project/data/warehouse.duckdb
       - key: CORS_ORIGINS
-        value: https://ehrqueryengine-frontend.onrender.com
+        value: "*"
       - key: APP_ENV
         value: production
       - key: LOG_LEVEL

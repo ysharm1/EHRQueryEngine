@@ -29,7 +29,7 @@ class CohortFilter(BaseModel):
     field: str
     operator: ComparisonOp
     value: str
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for compatibility."""
         return {
@@ -38,7 +38,6 @@ class CohortFilter(BaseModel):
             "operator": self.operator.value if isinstance(self.operator, Enum) else self.operator,
             "value": self.value
         }
-    value: str
 
 
 class VariableRequest(BaseModel):

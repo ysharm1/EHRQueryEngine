@@ -16,12 +16,12 @@ class Settings(BaseSettings):
     duckdb_path: str = "./data/warehouse.duckdb"
 
     # Authentication
-    jwt_secret_key: str
+    jwt_secret_key: str = "demo-secret-key-change-in-production-please-use-setup-sh"
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 30
 
     # CORS — comma-separated list of allowed origins
-    cors_origins: str = "http://localhost:3000,http://localhost:3001"
+    cors_origins: str = "*"
 
     # LLM
     openai_api_key: Optional[str] = None
@@ -38,6 +38,8 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins_list(self) -> List[str]:
+        if self.cors_origins.strip() == "*":
+            return ["*"]
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
     @property
