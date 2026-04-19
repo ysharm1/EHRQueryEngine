@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     postgres_user: str = "postgres"
     postgres_password: str = "postgres"
 
-    duckdb_path: str = "./data/warehouse.duckdb"
+    duckdb_path: str = "/tmp/warehouse.duckdb"
 
     # Authentication
     jwt_secret_key: str = "demo-secret-key-change-in-production-please-use-setup-sh"

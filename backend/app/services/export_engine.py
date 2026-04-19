@@ -28,7 +28,7 @@ class ExportEngine:
     - Requirements 11.1-11.6: Generate reproducible queries
     """
     
-    def __init__(self, export_dir: str = "exports"):
+    def __init__(self, export_dir: str = "/tmp/exports"):
         """
         Initialize export engine.
         

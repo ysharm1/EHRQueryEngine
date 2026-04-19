@@ -79,7 +79,7 @@ class QueryOrchestrator:
         self,
         db: Session,
         nl_parser: NLParserService,
-        export_dir: str = "exports"
+        export_dir: str = "/tmp/exports"
     ):
         """
         Initialize query orchestrator.

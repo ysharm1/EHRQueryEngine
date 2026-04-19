@@ -6,9 +6,9 @@ from app.config import settings
 import os
 
 # Use SQLite for demo (switch to PostgreSQL for production)
-# Create data directory if it doesn't exist
-os.makedirs("./data", exist_ok=True)
-SQLITE_URL = "sqlite:///./data/metadata.db"
+# Use /tmp for writable storage on Render free tier
+os.makedirs("/tmp/data", exist_ok=True)
+SQLITE_URL = "sqlite:////tmp/data/metadata.db"
 
 # SQLite for metadata (use PostgreSQL in production)
 engine = create_engine(SQLITE_URL, connect_args={"check_same_thread": False}, pool_pre_ping=True)
