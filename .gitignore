@@ -59,3 +59,6 @@ backend/exports/
 
 # Docker
 docker-compose.override.yml
+
+# Kiro internal specs
+.kiro/

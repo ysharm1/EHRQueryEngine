@@ -1,38 +1,51 @@
-# Research Dataset Builder
+# EHR Query Engine
 
-A platform that enables biomedical researchers to generate structured, analysis-ready datasets from multimodal clinical data sources using natural language queries.
+> Ask your clinical data anything. Get a structured dataset back.
 
-## Features
+A natural language query engine for biomedical research. Researchers type plain English questions — the system parses intent, queries the database, and returns a downloadable, analysis-ready dataset. No SQL. No data formatting. No waiting.
 
-- Natural language query interface (LLM-powered with demo mode fallback)
-- Multi-source data integration (EHR/FHIR, CSV upload, imaging metadata)
-- Canonical research schema for data standardization
-- Reproducible query generation with complete provenance
-- HIPAA-compliant audit logging with integrity checksums
-- Multiple export formats (CSV, Parquet, JSON)
-- Confidence scoring with clarification requests
-- Dataset explorer with pagination and metadata
-- JWT authentication with automatic token refresh
-- Role-based access control (Admin, Researcher, Data_Analyst, Read_Only)
+**Live Demo → [ehrqueryengine-frontend.onrender.com](https://ehrqueryengine-frontend.onrender.com)**
 
-## Architecture
+---
 
-- **Frontend**: Next.js 16 / React 19, TypeScript, TailwindCSS, TanStack Query
-- **Backend**: FastAPI, Python 3.11
-- **Databases**: SQLite (metadata) + DuckDB (analytics warehouse)
-- **Auth**: JWT (python-jose) + bcrypt password hashing
-- **LLM**: OpenAI or Anthropic (optional — demo mode works without API keys)
+## What It Does
 
-## Quick Start
-
-### Option 1: Automated Setup
-
-```bash
-chmod +x setup.sh
-./setup.sh
+```
+"Find all Parkinson's patients with DBS surgery"
+        ↓
+  Parse intent (cohort criteria + variables)
+        ↓
+  Query database (subjects, procedures, observations)
+        ↓
+  Return CSV / JSON / Parquet + provenance
 ```
 
-Then follow the printed instructions, or:
+Researchers go from question to dataset in seconds, not weeks.
+
+---
+
+## Stack
+
+| Layer | Tech |
+|---|---|
+| Frontend | Next.js 16, React 19, TypeScript, TailwindCSS |
+| Backend | FastAPI, Python 3.11 |
+| Analytics DB | DuckDB |
+| Metadata DB | SQLite |
+| NLP | OpenAI / Anthropic (demo mode works without API keys) |
+| Deploy | Render.com |
+
+---
+
+## Run Locally
+
+```bash
+git clone https://github.com/ysharm1/EHRQueryEngine.git
+cd EHRQueryEngine
+chmod +x setup.sh && ./setup.sh
+```
+
+Then in two terminals:
 
 ```bash
 # Terminal 1 — backend
@@ -46,14 +59,11 @@ npm install
 npm run dev -- -p 3001
 ```
 
-Open **http://localhost:3001** and sign in:
+Open **http://localhost:3001** — no login required.
 
-| Username     | Password       | Role       |
-|--------------|----------------|------------|
-| admin        | admin123       | Admin      |
-| researcher   | researcher123  | Researcher |
+---
 
-### Option 2: Docker
+## Docker
 
 ```bash
 docker-compose up --build
@@ -61,84 +71,96 @@ docker-compose up --build
 
 Open **http://localhost:3000**
 
+---
+
+## Deploy to Render
+
+The repo includes `render.yaml` for one-click deployment:
+
+1. Go to [render.com](https://render.com) → New → Blueprint
+2. Connect `ysharm1/EHRQueryEngine`
+3. Click Apply
+
+Both services deploy automatically.
+
+---
+
+## API
+
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| `POST` | `/api/demo/query` | None | **Public** NL query endpoint |
+| `POST` | `/api/query` | JWT | Authenticated query |
+| `POST` | `/api/upload` | JWT | Upload CSV/Excel data |
+| `GET` | `/api/tables` | JWT | List available tables |
+| `GET` | `/api/dataset/{id}` | JWT | Get dataset metadata |
+| `GET` | `/api/dataset/{id}/download` | JWT | Download files |
+| `POST` | `/api/auth/login` | None | Login |
+| `GET` | `/api/health` | None | Health check |
+
+Interactive docs: `http://localhost:8000/docs`
+
+---
+
+## Example Queries
+
+- `Find all Parkinson's patients with DBS surgery`
+- `Show subjects with diabetes and hypertension`
+- `Patients with MRI imaging data`
+- `All subjects in the treatment group`
+- `Find subjects with observations`
+
+---
+
+## Enable Full NLP (Optional)
+
+By default the system runs in demo mode (pattern matching). To enable real LLM parsing, add to `backend/.env`:
+
+```bash
+OPENAI_API_KEY=sk-...
+# or
+ANTHROPIC_API_KEY=sk-ant-...
+LLM_PROVIDER=openai
+```
+
+---
+
 ## Project Structure
 
 ```
-.
+EHRQueryEngine/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py              # FastAPI application entry
-│   │   ├── config.py            # Settings (pydantic-settings)
-│   │   ├── database.py          # SQLite + DuckDB connections
-│   │   ├── init_db.py           # DB init + sample data + password migration
-│   │   ├── models/              # SQLAlchemy models
-│   │   ├── api/routes.py        # All 14 API endpoints
-│   │   └── services/            # Core business logic
-│   │       ├── auth.py          # JWT + bcrypt authentication
-│   │       ├── nl_parser.py     # Natural language → structured intent
-│   │       ├── query_planner.py # Intent → optimized query plan
-│   │       ├── query_validator.py # Read-only safety checks
-│   │       ├── cohort.py        # Patient cohort identification
-│   │       ├── dataset_assembly.py # Multi-source dataset assembly
-│   │       ├── export_engine.py # CSV/Parquet/JSON export
-│   │       ├── query_orchestrator.py # Full pipeline coordinator
-│   │       ├── fhir_connector.py # FHIR API integration
-│   │       ├── smart_schema_detector.py # Auto schema inference
-│   │       ├── schema_mapper.py # Schema transformation
-│   │       └── audit_log.py     # HIPAA audit logging
+│   │   ├── api/routes.py          # All API endpoints
+│   │   ├── services/
+│   │   │   ├── nl_parser.py       # NL → structured intent
+│   │   │   ├── query_orchestrator.py  # Pipeline coordinator
+│   │   │   ├── cohort.py          # Patient cohort filtering
+│   │   │   ├── dataset_assembly.py    # Multi-source assembly
+│   │   │   ├── export_engine.py   # CSV/Parquet/JSON export
+│   │   │   └── audit_log.py       # HIPAA audit logging
+│   │   ├── models/                # SQLAlchemy models
+│   │   ├── config.py
+│   │   ├── database.py
+│   │   └── main.py
 │   ├── requirements.txt
-│   ├── Dockerfile
-│   └── .env.example
+│   └── Dockerfile
 ├── frontend/
-│   ├── app/                     # Next.js app router (login, dashboard)
-│   ├── components/              # React components
-│   │   ├── chat-interface.tsx   # NL query input
-│   │   ├── dataset-explorer.tsx # Dataset preview + pagination
-│   │   ├── dataset-export.tsx   # Export format selection + download
-│   │   ├── data-upload.tsx      # CSV/Excel file upload
-│   │   └── ...
-│   ├── lib/                     # Auth context, API client, types
-│   ├── Dockerfile
-│   └── .env.local
+│   ├── app/
+│   │   ├── demo/page.tsx          # Public demo UI
+│   │   └── dashboard/page.tsx     # Full dashboard
+│   ├── components/
+│   │   ├── chat-interface.tsx
+│   │   ├── data-upload.tsx
+│   │   ├── dataset-explorer.tsx
+│   │   └── dataset-export.tsx
+│   └── Dockerfile
+├── render.yaml                    # One-click Render deployment
 ├── docker-compose.yml
-├── setup.sh                     # One-time setup script
-└── README.md
+└── setup.sh
 ```
 
-## API Endpoints
-
-| Method | Endpoint                          | Description                    |
-|--------|-----------------------------------|--------------------------------|
-| POST   | `/api/auth/login`                 | User login                     |
-| POST   | `/api/auth/logout`                | User logout                    |
-| POST   | `/api/auth/refresh`               | Refresh access token           |
-| GET    | `/api/auth/me`                    | Get current user info          |
-| POST   | `/api/query`                      | Submit natural language query   |
-| GET    | `/api/datasets`                   | List user's datasets           |
-| GET    | `/api/query/{id}/status`          | Check query status             |
-| GET    | `/api/dataset/{id}`               | Get dataset (rows + schema)    |
-| GET    | `/api/dataset/{id}/files`         | List export files              |
-| GET    | `/api/dataset/{id}/download`      | Download export file           |
-| POST   | `/api/upload`                     | Upload CSV/Excel data          |
-| GET    | `/api/tables`                     | List available tables          |
-| POST   | `/api/fhir/ingest`                | Trigger FHIR data ingestion    |
-| GET    | `/api/health`                     | Health check                   |
-
-## Sample Queries
-
-- "Find all Parkinson's patients"
-- "Parkinson's patients with DBS surgery"
-- "Patients over 65 with diabetes, include medication history"
-- "Subjects with MRI imaging features"
-
-## Environment Variables
-
-See `backend/.env.example` for all backend settings. Key variables:
-
-- `JWT_SECRET_KEY` — generated automatically by `setup.sh`
-- `LLM_PROVIDER` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` — optional, demo mode works without
-- `CORS_ORIGINS` — allowed frontend origins
-- `FHIR_BASE_URL` / `FHIR_AUTH_TOKEN` — optional FHIR integration
+---
 
 ## License
 
