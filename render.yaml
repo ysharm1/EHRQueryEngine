@@ -31,8 +31,8 @@ services:
     runtime: node
     plan: standard  # Professional plan instance
     rootDir: frontend
-    buildCommand: npm install && npm run build && cp -r .next/static .next/standalone/.next/ && cp -r public .next/standalone/
-    startCommand: cd .next/standalone && node server.js
+    buildCommand: npm install && npm run build
+    startCommand: npm start
     envVars:
       - key: NEXT_PUBLIC_API_URL
         value: https://ehrqueryengine-backend.onrender.com
