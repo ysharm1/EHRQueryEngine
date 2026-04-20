@@ -698,13 +698,73 @@ async def health_check():
 # ── Public Dataset Discovery (no auth required) ───────────────────────────────
 @router.get("/demo/public-datasets")
 async def search_public_datasets(q: str = ""):
-    """
-    Search for publicly available datasets matching the query.
-    Returns curated list of open biomedical datasets with citations.
-    """
+    """Search for publicly available datasets matching the query."""
     from app.services.public_dataset_search import search_public_datasets as _search
     results = _search(q)
     return {"query": q, "results": results}
+
+
+@router.post("/demo/upload")
+async def demo_upload(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Public upload endpoint — no authentication required.
+    Accepts CSV/Excel/JSON files and loads them into DuckDB for querying.
+    """
+    from app.database import get_duckdb_connection
+    from app.services.smart_schema_detector import SmartSchemaDetector
+
+    try:
+        file_ext = Path(file.filename).suffix.lower()
+
+        if file_ext == '.csv':
+            df = pd.read_csv(file.file)
+        elif file_ext in ['.xlsx', '.xls']:
+            df = pd.read_excel(file.file)
+        elif file_ext == '.json':
+            df = pd.read_json(file.file)
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type: {file_ext}. Use .csv, .xlsx, .xls, or .json"
+            )
+
+        if df.empty:
+            raise HTTPException(status_code=400, detail="File is empty")
+
+        # Generate safe table name
+        table_name = Path(file.filename).stem.lower()
+        table_name = ''.join(c if c.isalnum() or c == '_' else '_' for c in table_name)
+        if not table_name or table_name[0].isdigit():
+            table_name = f"upload_{table_name}"
+
+        # Detect schema
+        detector = SmartSchemaDetector()
+        detected_schema = detector.detect_schema(df)
+
+        # Load into DuckDB
+        conn = get_duckdb_connection()
+        existing = [t[0] for t in conn.execute("SHOW TABLES").fetchall()]
+        if table_name in existing:
+            conn.execute(f"DROP TABLE {table_name}")
+        conn.execute(f"CREATE TABLE {table_name} AS SELECT * FROM df")
+        conn.close()
+
+        return {
+            "status": "success",
+            "table_name": table_name,
+            "rows_imported": len(df),
+            "columns": list(df.columns),
+            "sample_data": df.head(3).to_dict(orient='records'),
+            "detected_schema": detected_schema.to_dict(),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 
 # ── Public Demo Endpoint (no auth required) ──────────────────────────────────
