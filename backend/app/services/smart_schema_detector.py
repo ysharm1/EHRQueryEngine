@@ -135,7 +135,7 @@ class SmartSchemaDetector:
             return "date"
         if _DATE_PATTERNS.search(tok):
             try:
-                pd.to_datetime(series.dropna().astype(str).iloc[:10], infer_datetime_format=True)
+                pd.to_datetime(series.dropna().astype(str).iloc[:10], format='mixed')
                 return "date"
             except Exception:
                 pass
