@@ -147,7 +147,7 @@ def search_public_datasets(query: str) -> List[Dict[str, Any]]:
 
 
 def _keyword_search(query: str) -> List[Dict[str, Any]]:
-    """Simple keyword-based search."""
+    """Simple keyword-based search. Returns empty list if nothing matches."""
     query_lower = query.lower()
     scored = []
 
@@ -167,21 +167,11 @@ def _keyword_search(query: str) -> List[Dict[str, Any]]:
             scored.append((score, dataset))
 
     scored.sort(key=lambda x: x[0], reverse=True)
-    results = [d for _, d in scored[:5]]
-
-    # Always return at least 2 results
-    if len(results) < 2:
-        for d in DATASET_CATALOG:
-            if d not in results:
-                results.append(d)
-            if len(results) >= 3:
-                break
-
-    return results
+    return [d for _, d in scored[:5]]
 
 
 def _llm_search(query: str) -> List[Dict[str, Any]]:
-    """Use OpenAI to rank datasets by relevance to the query."""
+    """Use OpenAI to rank datasets by relevance. Returns empty list if none relevant."""
     from openai import OpenAI
 
     client = OpenAI(api_key=settings.openai_api_key)
@@ -196,11 +186,17 @@ def _llm_search(query: str) -> List[Dict[str, Any]]:
         messages=[
             {
                 "role": "system",
-                "content": "You are a biomedical research assistant. Given a research query, identify the most relevant public datasets from the provided catalog. Return ONLY a JSON array of dataset IDs, ordered by relevance, max 4 items. Example: [\"ppmi\", \"adni\"]"
+                "content": (
+                    "You are a biomedical research assistant. Given a research query, "
+                    "identify the most relevant public datasets from the provided catalog. "
+                    "Return ONLY a JSON array of dataset IDs ordered by relevance, max 4 items. "
+                    "If NO datasets are relevant to the query, return an empty array []. "
+                    "Example: [\"ppmi\", \"adni\"] or []"
+                )
             },
             {
                 "role": "user",
-                "content": f"Research query: \"{query}\"\n\nAvailable datasets:\n{catalog_summary}\n\nReturn the IDs of the most relevant datasets as a JSON array."
+                "content": f"Research query: \"{query}\"\n\nAvailable datasets:\n{catalog_summary}\n\nReturn relevant dataset IDs as a JSON array, or [] if none are relevant."
             }
         ],
         temperature=0,
@@ -216,14 +212,4 @@ def _llm_search(query: str) -> List[Dict[str, Any]]:
 
     ids = json.loads(raw)
     id_map = {d["id"]: d for d in DATASET_CATALOG}
-    results = [id_map[i] for i in ids if i in id_map]
-
-    # Fill to at least 2
-    if len(results) < 2:
-        for d in DATASET_CATALOG:
-            if d not in results:
-                results.append(d)
-            if len(results) >= 3:
-                break
-
-    return results
+    return [id_map[i] for i in ids if i in id_map]
