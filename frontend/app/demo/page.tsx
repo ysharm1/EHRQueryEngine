@@ -39,7 +39,6 @@ interface UploadResult {
   table_name: string;
   rows_imported: number;
   columns: string[];
-  sample_data: any[];
 }
 
 type Step = 'idle' | 'parsing' | 'querying' | 'done';
@@ -50,6 +49,8 @@ const PIPELINE_STEPS = [
   { key: 'done', label: 'Build Dataset' },
 ];
 
+const FILE_ICONS: Record<string, string> = { CSV: '📊', JSON: '📋', SQL: '🔍', PARQUET: '📦' };
+
 export default function DemoPage() {
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
@@ -57,6 +58,9 @@ export default function DemoPage() {
   const [publicDatasets, setPublicDatasets] = useState<PublicDataset[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [step, setStep] = useState<Step>('idle');
+
+  // Toggle: include public dataset search
+  const [includePublic, setIncludePublic] = useState(true);
 
   // Upload state
   const [showUpload, setShowUpload] = useState(false);
@@ -78,29 +82,40 @@ export default function DemoPage() {
       await new Promise(r => setTimeout(r, 500));
       setStep('querying');
 
-      const [queryRes, publicRes] = await Promise.allSettled([
+      const requests: Promise<any>[] = [
         axios.post(`${API_URL}/api/demo/query`, {
           query_text: queryText,
           data_source_ids: ['subjects', 'procedures', 'observations'],
           output_format: 'CSV',
         }),
-        axios.get(`${API_URL}/api/demo/public-datasets`, { params: { q: queryText } }),
-      ]);
+      ];
 
+      if (includePublic) {
+        requests.push(
+          axios.get(`${API_URL}/api/demo/public-datasets`, { params: { q: queryText } })
+        );
+      }
+
+      const results = await Promise.allSettled(requests);
+
+      const queryRes = results[0];
       if (queryRes.status === 'fulfilled') {
         setResult(queryRes.value.data);
       } else {
-        const err = (queryRes as any).reason;
-        setError(err.response?.data?.detail || 'Query failed. Please try again.');
+        const err = (queryRes as PromiseRejectedResult).reason;
+        setError(err?.response?.data?.detail || 'Query failed. Please try again.');
       }
 
-      if (publicRes.status === 'fulfilled') {
-        setPublicDatasets((publicRes as any).value.data.results || []);
+      if (includePublic && results[1]) {
+        const publicRes = results[1];
+        if (publicRes.status === 'fulfilled') {
+          setPublicDatasets((publicRes as PromiseFulfilledResult<any>).value.data.results || []);
+        }
       }
 
       setStep('done');
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Something went wrong.');
+      setError(err?.response?.data?.detail || 'Something went wrong. Please try again.');
       setStep('idle');
     } finally {
       setLoading(false);
@@ -115,21 +130,18 @@ export default function DemoPage() {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     setUploading(true);
     setUploadError(null);
     setUploadResult(null);
-
     const formData = new FormData();
     formData.append('file', file);
-
     try {
       const res = await axios.post(`${API_URL}/api/demo/upload`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setUploadResult(res.data);
     } catch (err: any) {
-      setUploadError(err.response?.data?.detail || 'Upload failed.');
+      setUploadError(err?.response?.data?.detail || 'Upload failed. Check file format and try again.');
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -149,10 +161,10 @@ export default function DemoPage() {
       <header className="border-b border-white/10 px-6 py-4">
         <div className="mx-auto max-w-5xl flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-sm font-bold">E</div>
+            <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-sm font-bold select-none">E</div>
             <div>
               <span className="font-semibold text-white">EHR Query Engine</span>
-              <span className="ml-2 text-xs text-white/40">by Research Dataset Builder</span>
+              <span className="ml-2 text-xs text-white/40">Research Dataset Builder</span>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -164,48 +176,33 @@ export default function DemoPage() {
                   : 'border-white/10 bg-white/5 text-white/50 hover:text-white/80'
               }`}
             >
-              {showUpload ? '✕ Close Upload' : '↑ Upload Data'}
+              {showUpload ? '✕ Close' : '↑ Upload Data'}
             </button>
             <span className="flex items-center gap-1.5 text-xs text-emerald-400">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
               Live
             </span>
-            <a
-              href="https://github.com/ysharm1/EHRQueryEngine"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-white/40 hover:text-white/70 transition-colors"
-            >
+            <a href="https://github.com/ysharm1/EHRQueryEngine" target="_blank" rel="noopener noreferrer"
+              className="text-xs text-white/40 hover:text-white/70 transition-colors">
               GitHub →
             </a>
           </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl px-6 py-12 space-y-8">
+      <main className="mx-auto max-w-5xl px-6 py-10 space-y-8">
 
         {/* Upload Panel */}
         {showUpload && (
           <div className="rounded-2xl border border-blue-500/20 bg-blue-500/5 p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="font-semibold text-sm text-white">Upload Your Dataset</h2>
-                <p className="text-xs text-white/40 mt-0.5">CSV, Excel (.xlsx), or JSON — the system auto-detects the schema</p>
-              </div>
+            <div>
+              <h2 className="font-semibold text-sm text-white">Upload Your Dataset</h2>
+              <p className="text-xs text-white/40 mt-0.5">CSV, Excel (.xlsx), or JSON — schema is auto-detected, no formatting needed</p>
             </div>
-
-            {/* Drop zone */}
             <label className={`flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-8 cursor-pointer transition-colors ${
               uploading ? 'border-blue-500/30 bg-blue-500/5' : 'border-white/10 hover:border-blue-500/40 hover:bg-blue-500/5'
             }`}>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".csv,.xlsx,.xls,.json"
-                onChange={handleFileUpload}
-                className="hidden"
-                disabled={uploading}
-              />
+              <input ref={fileInputRef} type="file" accept=".csv,.xlsx,.xls,.json" onChange={handleFileUpload} className="hidden" disabled={uploading} />
               {uploading ? (
                 <div className="flex items-center gap-2 text-blue-400 text-sm">
                   <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
@@ -217,25 +214,19 @@ export default function DemoPage() {
               ) : (
                 <>
                   <div className="text-3xl">📂</div>
-                  <div className="text-sm text-white/60">Click to select a file, or drag and drop</div>
+                  <div className="text-sm text-white/60">Click to select a file</div>
                   <div className="text-xs text-white/30">CSV · Excel · JSON</div>
                 </>
               )}
             </label>
-
-            {/* Upload error */}
             {uploadError && (
-              <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-red-400 text-xs">
-                {uploadError}
-              </div>
+              <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-red-400 text-xs">{uploadError}</div>
             )}
-
-            {/* Upload success */}
             {uploadResult && (
-              <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 space-y-3">
+              <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 space-y-2">
                 <div className="flex items-center gap-2 text-emerald-400 text-sm font-medium">
                   <span>✓</span>
-                  <span>Imported as table <code className="font-mono bg-white/10 px-1.5 py-0.5 rounded text-xs">{uploadResult.table_name}</code></span>
+                  <span>Imported as <code className="font-mono bg-white/10 px-1.5 py-0.5 rounded text-xs">{uploadResult.table_name}</code></span>
                 </div>
                 <div className="flex gap-4 text-xs text-white/50">
                   <span>👥 {uploadResult.rows_imported.toLocaleString()} rows</span>
@@ -243,33 +234,25 @@ export default function DemoPage() {
                 </div>
                 <div className="flex flex-wrap gap-1">
                   {uploadResult.columns.slice(0, 8).map(col => (
-                    <span key={col} className="rounded bg-white/5 border border-white/10 px-2 py-0.5 text-xs text-white/50 font-mono">
-                      {col}
-                    </span>
+                    <span key={col} className="rounded bg-white/5 border border-white/10 px-2 py-0.5 text-xs text-white/50 font-mono">{col}</span>
                   ))}
-                  {uploadResult.columns.length > 8 && (
-                    <span className="text-xs text-white/30">+{uploadResult.columns.length - 8} more</span>
-                  )}
+                  {uploadResult.columns.length > 8 && <span className="text-xs text-white/30">+{uploadResult.columns.length - 8} more</span>}
                 </div>
-                <p className="text-xs text-white/40">
-                  Your data is loaded. Now type a query below to search it.
-                </p>
+                <p className="text-xs text-white/40">Data loaded. Type a query below to search it.</p>
               </div>
             )}
           </div>
         )}
 
         {/* Hero */}
-        <div className="text-center space-y-4">
+        <div className="text-center space-y-3">
           <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-4 py-1.5 text-xs text-blue-400">
             Natural Language → Research Dataset
           </div>
-          <h1 className="text-4xl font-bold tracking-tight">
-            Ask your clinical data anything
-          </h1>
-          <p className="text-white/50 max-w-lg mx-auto text-base">
+          <h1 className="text-4xl font-bold tracking-tight">Ask your clinical data anything</h1>
+          <p className="text-white/50 max-w-lg mx-auto text-sm">
             Upload your own dataset or query the built-in sample data.
-            The engine parses your intent and surfaces both local results and public datasets.
+            The engine parses your intent and returns a downloadable, analysis-ready dataset.
           </p>
         </div>
 
@@ -284,6 +267,30 @@ export default function DemoPage() {
               placeholder="e.g. Find all Parkinson's patients who had DBS surgery"
               className="w-full rounded-xl bg-white/5 border border-white/10 px-4 py-3 text-white placeholder-white/25 focus:outline-none focus:ring-2 focus:ring-blue-500/50 resize-none text-sm"
             />
+
+            {/* Toggle row */}
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => setIncludePublic(v => !v)}
+                className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs border transition-all ${
+                  includePublic
+                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
+                    : 'border-white/10 bg-white/5 text-white/40 hover:text-white/60'
+                }`}
+              >
+                <span className={`w-3 h-3 rounded-full border-2 flex items-center justify-center transition-colors ${
+                  includePublic ? 'border-emerald-400 bg-emerald-400' : 'border-white/30'
+                }`}>
+                  {includePublic && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                </span>
+                {includePublic ? 'Also search public datasets' : 'Local data only'}
+              </button>
+              <span className="text-xs text-white/25">
+                {includePublic ? 'Will show PPMI, MIMIC, TCGA, etc.' : 'Only your uploaded / sample data'}
+              </span>
+            </div>
+
             <button
               type="submit"
               disabled={loading || !query.trim()}
@@ -306,12 +313,8 @@ export default function DemoPage() {
             <p className="text-xs text-white/30 mb-2">Try an example:</p>
             <div className="flex flex-wrap gap-2">
               {EXAMPLE_QUERIES.map(q => (
-                <button
-                  key={q}
-                  onClick={() => runQuery(q)}
-                  disabled={loading}
-                  className="rounded-full border border-white/10 bg-white/5 hover:bg-white/10 disabled:opacity-40 px-3 py-1 text-xs text-white/60 transition-colors"
-                >
+                <button key={q} onClick={() => runQuery(q)} disabled={loading}
+                  className="rounded-full border border-white/10 bg-white/5 hover:bg-white/10 disabled:opacity-40 px-3 py-1 text-xs text-white/60 transition-colors">
                   {q}
                 </button>
               ))}
@@ -347,7 +350,7 @@ export default function DemoPage() {
         {/* Error */}
         {error && (
           <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-red-400 text-sm">
-            {error}
+            ⚠ {error}
           </div>
         )}
 
@@ -363,7 +366,7 @@ export default function DemoPage() {
                   <div className="flex-1 h-px bg-white/10" />
                 </div>
 
-                {result.status === 'Completed' ? (
+                {result.status === 'Completed' && result.row_count > 0 ? (
                   <>
                     <div className="grid grid-cols-3 gap-3">
                       {[
@@ -378,14 +381,14 @@ export default function DemoPage() {
                       ))}
                     </div>
 
-                    {result.metadata?.confidence_score && (
+                    {result.metadata?.confidence_score != null && (
                       <div className="rounded-xl border border-white/10 bg-white/5 p-4 flex items-center justify-between text-sm">
                         <span className="text-white/50">Query confidence</span>
                         <div className="flex items-center gap-2">
                           <div className="w-24 h-1.5 rounded-full bg-white/10 overflow-hidden">
                             <div className="h-full rounded-full bg-emerald-400" style={{ width: `${(result.metadata.confidence_score * 100).toFixed(0)}%` }} />
                           </div>
-                          <span className="text-emerald-400 font-medium">{(result.metadata.confidence_score * 100).toFixed(0)}%</span>
+                          <span className="text-emerald-400 font-medium text-xs">{(result.metadata.confidence_score * 100).toFixed(0)}%</span>
                         </div>
                       </div>
                     )}
@@ -395,15 +398,13 @@ export default function DemoPage() {
                         <p className="text-xs text-white/40 uppercase tracking-widest">Download Dataset</p>
                         <div className="flex flex-wrap gap-2">
                           {result.download_urls.map((url, i) => {
-                            const raw = url.split('?')[0];
-                            const filename = raw.split('/').pop() || `file-${i}`;
+                            const filename = url.split('?')[0].split('/').pop() || `file-${i}`;
                             const ext = filename.split('.').pop()?.toUpperCase() || 'FILE';
-                            const icons: Record<string, string> = { CSV: '📊', JSON: '📋', SQL: '🔍', PARQUET: '📦' };
                             return (
                               <button key={url} onClick={() => downloadFile(url)}
                                 className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 px-4 py-2 text-sm font-medium transition-colors">
-                                <span>{icons[ext] || '📄'}</span>
-                                <span>{ext}</span>
+                                <span>{FILE_ICONS[ext] || '📄'}</span>
+                                <span className="text-white/80">{ext}</span>
                                 <span className="text-white/40 text-xs">{filename}</span>
                               </button>
                             );
@@ -413,65 +414,80 @@ export default function DemoPage() {
                     )}
                   </>
                 ) : (
-                  <div className="rounded-xl border border-yellow-500/20 bg-yellow-500/10 p-4 text-yellow-400 text-sm">
-                    {result.error_message || 'No matching subjects found. Try uploading your own data or a different query.'}
+                  <div className="rounded-xl border border-yellow-500/20 bg-yellow-500/10 p-4 text-yellow-400 text-sm space-y-1">
+                    <div className="font-medium">No matching subjects found in local database</div>
+                    <div className="text-xs text-yellow-400/70">
+                      {result?.error_message || 'Try uploading your own data or adjusting your query.'}
+                      {includePublic && ' Public datasets below may have relevant data.'}
+                    </div>
                   </div>
                 )}
               </div>
             )}
 
             {/* Public Datasets */}
-            {publicDatasets.length > 0 && (
+            {includePublic && (
               <div className="space-y-4">
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-white/40 uppercase tracking-widest">Public Datasets</span>
                   <div className="flex-1 h-px bg-white/10" />
-                  <span className="text-xs text-white/30">{publicDatasets.length} found</span>
+                  {publicDatasets.length > 0
+                    ? <span className="text-xs text-white/30">{publicDatasets.length} found</span>
+                    : <span className="text-xs text-white/20">searching...</span>
+                  }
                 </div>
 
-                <div className="space-y-3">
-                  {publicDatasets.map(ds => (
-                    <div key={ds.id} className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-2 hover:border-white/20 transition-colors">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="space-y-1 flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-medium text-sm text-white">{ds.name}</span>
-                            <span className="text-xs text-white/40 border border-white/10 rounded px-1.5 py-0.5">{ds.organization}</span>
+                {publicDatasets.length > 0 ? (
+                  <>
+                    <div className="space-y-3">
+                      {publicDatasets.map(ds => (
+                        <div key={ds.id} className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-2 hover:border-white/20 transition-colors">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="space-y-1 flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-medium text-sm text-white">{ds.name}</span>
+                                <span className="text-xs text-white/40 border border-white/10 rounded px-1.5 py-0.5">{ds.organization}</span>
+                              </div>
+                              <p className="text-xs text-white/50 leading-relaxed">{ds.description}</p>
+                            </div>
+                            <a href={ds.url} target="_blank" rel="noopener noreferrer"
+                              className="shrink-0 rounded-lg border border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/20 px-3 py-1.5 text-xs text-blue-400 font-medium transition-colors whitespace-nowrap">
+                              Access →
+                            </a>
                           </div>
-                          <p className="text-xs text-white/50 leading-relaxed">{ds.description}</p>
+                          <div className="flex items-center gap-4 text-xs text-white/40 flex-wrap">
+                            <span>👥 {ds.subjects} subjects</span>
+                            <span>📁 {ds.format}</span>
+                            <span>🔑 {ds.access}</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {ds.tags.slice(0, 5).map(tag => (
+                              <span key={tag} className="rounded-full bg-white/5 border border-white/10 px-2 py-0.5 text-xs text-white/40">{tag}</span>
+                            ))}
+                          </div>
                         </div>
-                        <a href={ds.url} target="_blank" rel="noopener noreferrer"
-                          className="shrink-0 rounded-lg border border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/20 px-3 py-1.5 text-xs text-blue-400 font-medium transition-colors">
-                          Access →
-                        </a>
-                      </div>
-                      <div className="flex items-center gap-4 text-xs text-white/40 flex-wrap">
-                        <span>👥 {ds.subjects} subjects</span>
-                        <span>📁 {ds.format}</span>
-                        <span>🔑 {ds.access}</span>
-                      </div>
-                      <div className="flex flex-wrap gap-1">
-                        {ds.tags.slice(0, 5).map(tag => (
-                          <span key={tag} className="rounded-full bg-white/5 border border-white/10 px-2 py-0.5 text-xs text-white/40">{tag}</span>
-                        ))}
-                      </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-                <p className="text-xs text-white/25 text-center">
-                  Public datasets require separate access approval. Links go directly to source.
-                </p>
+                    <p className="text-xs text-white/25 text-center">
+                      Public datasets require separate access approval. Links go directly to source.
+                    </p>
+                  </>
+                ) : (
+                  <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-white/30 text-sm text-center">
+                    No public datasets matched your query.
+                  </div>
+                )}
               </div>
             )}
           </div>
         )}
 
-        {/* How it works */}
+        {/* How it works — only before first query */}
         {step === 'idle' && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {[
-              { icon: '↑', title: 'Upload Your Data', desc: 'Bring your own CSV, Excel, or JSON file. The system auto-detects the schema — no formatting needed.' },
-              { icon: '💬', title: 'Query in Plain English', desc: 'Type your research question. GPT-4 parses your intent and queries the database automatically.' },
+              { icon: '↑', title: 'Upload Your Data', desc: 'Bring your own CSV, Excel, or JSON. Schema is auto-detected — no formatting needed.' },
+              { icon: '💬', title: 'Query in Plain English', desc: 'Type your research question. GPT-4 parses intent and queries the database automatically.' },
               { icon: '🌐', title: 'Local + Public Results', desc: 'Get your local dataset plus relevant public datasets (PPMI, MIMIC, TCGA, etc.) with direct access links.' },
             ].map(item => (
               <div key={item.title} className="rounded-2xl border border-white/10 bg-white/5 p-5 space-y-2">
