@@ -66,7 +66,7 @@ class AuditLog(Base):
     
     log_id = Column(String, primary_key=True, index=True)
     timestamp = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
-    user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)  # Nullable for failed auth attempts
+    user_id = Column(String, nullable=True, index=True)  # Nullable for failed auth / demo-user
     action = Column(String, nullable=False, index=True)  # e.g., "query_submit", "dataset_generate", "auth_attempt"
     details = Column(JSON, nullable=False)  # Action-specific details
     ip_address = Column(String, nullable=True)

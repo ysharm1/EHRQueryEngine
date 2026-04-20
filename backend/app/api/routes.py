@@ -13,14 +13,12 @@ from pydantic import BaseModel
 from datetime import datetime
 from pathlib import Path
 import pandas as pd
-import duckdb
 
 from app.database import get_db
 from app.services.auth import AuthService, get_current_user
 from app.services.nl_parser import NLParserService
 from app.services.query_orchestrator import QueryOrchestrator, QueryRequest, QueryStatus
 from app.services.audit_log import AuditLogService
-from app.services.fhir_connector import FHIRConnector, FHIRConfig, FHIRQuery, FHIRResource
 from app.models.user import User
 from app.models.metadata import ExportFormat
 
@@ -77,14 +75,6 @@ class DatasetMetadataResponse(BaseModel):
     column_count: int
     data_sources: List[str]
     export_format: str
-
-
-class FHIRIngestRequest(BaseModel):
-    """FHIR data ingestion request model."""
-    base_url: str
-    auth_token: str
-    resource_type: str
-    search_params: dict = {}
 
 
 class HealthResponse(BaseModel):
@@ -524,59 +514,6 @@ async def download_dataset(
         filename=Path(file_path).name,
         media_type="application/octet-stream"
     )
-
-
-# FHIR Endpoints
-@router.post("/fhir/ingest")
-async def ingest_fhir_data(
-    request: FHIRIngestRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Trigger FHIR data ingestion.
-    
-    Implements Requirement 6.1
-    """
-    try:
-        # Create FHIR config
-        config = FHIRConfig(
-            base_url=request.base_url,
-            auth_token=request.auth_token
-        )
-        
-        # Create FHIR connector
-        connector = FHIRConnector(config)
-        
-        # Create query
-        resource_type = FHIRResource(request.resource_type)
-        search_params = [(k, v) for k, v in request.search_params.items()]
-        
-        query = FHIRQuery(
-            resource_type=resource_type,
-            search_params=search_params
-        )
-        
-        # Execute query
-        bundle = connector.query(query)
-        
-        # Transform to canonical
-        canonical_records = connector.transform_to_canonical(bundle)
-        
-        # Close connector
-        connector.close()
-        
-        return {
-            "message": "FHIR data ingestion completed",
-            "records_ingested": len(canonical_records),
-            "resource_type": request.resource_type
-        }
-    
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"FHIR ingestion failed: {str(e)}"
-        )
 
 
 # File Upload Endpoint

@@ -51,7 +51,8 @@ class QueryValidator:
         "subjects",
         "procedures",
         "observations",
-        "imaging_features"
+        "imaging_features",
+        "imaging",  # alias used in variable requests
     }
     
     # SQL keywords that indicate data modification

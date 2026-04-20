@@ -9,7 +9,6 @@ from typing import Optional, Callable, Any
 import logging
 import time
 from functools import wraps
-from app.services.fhir_connector import FHIRAuthenticationError
 
 
 logger = logging.getLogger(__name__)
