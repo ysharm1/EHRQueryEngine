@@ -611,6 +611,74 @@ async def upload_data(
         )
 
 
+@router.get("/schema/analyze")
+async def analyze_schema(
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Analyze database schema and return semantic mappings.
+    Shows all tables, columns, and their inferred semantic types.
+    """
+    from app.database import get_duckdb_connection
+    from app.services.dynamic_schema_analyzer import DynamicSchemaAnalyzer
+    
+    try:
+        conn = get_duckdb_connection()
+        analyzer = DynamicSchemaAnalyzer(conn)
+        summary = analyzer.get_schema_summary()
+        conn.close()
+        
+        return summary
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Schema analysis failed: {str(e)}"
+        )
+
+
+@router.get("/schema/map")
+async def map_terms_to_columns(
+    terms: str,  # Comma-separated list
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Map natural language terms to database columns.
+    Example: /schema/map?terms=age,diagnosis,gender
+    """
+    from app.database import get_duckdb_connection
+    from app.services.dynamic_schema_analyzer import DynamicSchemaAnalyzer
+    
+    try:
+        conn = get_duckdb_connection()
+        analyzer = DynamicSchemaAnalyzer(conn)
+        
+        term_list = [t.strip() for t in terms.split(",")]
+        mappings = analyzer.map_natural_language_to_columns(term_list)
+        
+        conn.close()
+        
+        return {
+            "terms": term_list,
+            "mappings": {
+                term: {
+                    "table": col.table_name,
+                    "column": col.column_name,
+                    "type": col.data_type,
+                    "semantic_type": col.semantic_type,
+                    "confidence": col.confidence
+                }
+                for term, col in mappings.items()
+            }
+        }
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Term mapping failed: {str(e)}"
+        )
+
+
 @router.get("/tables")
 async def list_tables(
     current_user: User = Depends(get_current_user)
