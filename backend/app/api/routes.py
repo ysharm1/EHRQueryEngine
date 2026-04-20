@@ -745,6 +745,10 @@ async def demo_download(
         filename=Path(file_path).name,
         media_type="application/octet-stream"
     )
+
+
+# Health Check Endpoint
+@router.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint."""
     return HealthResponse(
@@ -752,6 +756,18 @@ async def health_check():
         timestamp=datetime.now().isoformat(),
         version="1.0.0"
     )
+
+
+# ── Public Dataset Discovery (no auth required) ───────────────────────────────
+@router.get("/demo/public-datasets")
+async def search_public_datasets(q: str = ""):
+    """
+    Search for publicly available datasets matching the query.
+    Returns curated list of open biomedical datasets with citations.
+    """
+    from app.services.public_dataset_search import search_public_datasets as _search
+    results = _search(q)
+    return {"query": q, "results": results}
 
 
 # ── Public Demo Endpoint (no auth required) ──────────────────────────────────
