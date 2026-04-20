@@ -112,7 +112,8 @@ class CohortIdentifier:
             return self._evaluate_medication_filter(subject, criterion)
         
         else:
-            logger.warning(f"Unknown filter type: {filter_type}")
+            logger.warning(f"Unknown filter type: {filter_type}, treating as match")
+            return True  # Unknown filter types don't block subjects
             return False
     
     def _evaluate_diagnosis_filter(
@@ -133,13 +134,15 @@ class CohortIdentifier:
         
         return value in subject.diagnosis_codes
     
-    def _evaluate_procedure_filter(
-        self,
-        subject: Subject,
-        criterion: Dict[str, Any]
-    ) -> bool:
-        """Evaluate procedure filter. Matches on code OR name."""
-        procedure_value = criterion.get("value", "").lower()
+    def _evaluate_procedure_filter(self, subject: Subject, criterion: Dict[str, Any]) -> bool:
+        """Evaluate procedure filter. Matches on code OR partial name."""
+        procedure_value = criterion.get("value", "").lower().strip()
+
+        # Empty value = match all subjects that have any procedure
+        if not procedure_value:
+            return self.db.query(Procedure).filter(
+                Procedure.subject_id == subject.subject_id
+            ).count() > 0
 
         procedures = self.db.query(Procedure).filter(
             Procedure.subject_id == subject.subject_id
@@ -148,12 +151,12 @@ class CohortIdentifier:
         for procedure in procedures:
             code_match = procedure.procedure_code.lower() == procedure_value
             name_match = procedure_value in (procedure.procedure_name or "").lower()
-            if code_match or name_match:
+            # Also match common abbreviations: DBS → Deep Brain Stimulation
+            abbrev_map = {"dbs": "deep brain stimulation", "cabg": "coronary artery bypass"}
+            expanded = abbrev_map.get(procedure_value, procedure_value)
+            expanded_match = expanded in (procedure.procedure_name or "").lower()
+            if code_match or name_match or expanded_match:
                 return True
-
-        # If no procedures at all, still return True for broad queries
-        if not procedure_value:
-            return True
 
         return False
     

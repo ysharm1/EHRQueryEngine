@@ -135,15 +135,25 @@ class DatasetAssemblyEngine:
         
         # Build schema (Req 7.5)
         schema = self._build_schema(variables)
-        
+
         # Collect data for all subjects (Req 7.1, 7.2)
         rows = []
         missing_counts = {var.name: 0 for var in variables}
+        # Deduplicate variables to match schema
+        seen = set()
+        deduped_variables = []
+        for var in variables:
+            key = self.normalize_variable_name(var.name)
+            if key == "subject_id" or key in seen:
+                continue
+            seen.add(key)
+            deduped_variables.append(var)
+
+        # Rebuild schema with deduped variables
+        schema = self._build_schema(deduped_variables)
         
         for subject in cohort:
-            row = self._collect_subject_row(subject, variables, missing_counts)
-            
-            # Check if row should be excluded due to missing values
+            row = self._collect_subject_row(subject, deduped_variables, missing_counts)
             if row is not None:
                 rows.append(row)
         
@@ -210,14 +220,14 @@ class DatasetAssemblyEngine:
             description="Subject identifier"
         ))
         
-        # Add columns for each variable
+        # Add columns for each variable, skip subject_id if already added
+        seen_names = {"subject_id"}
         for variable in variables:
-            # Normalize variable name (Req 9.1-9.6)
             normalized_name = self.normalize_variable_name(variable.name)
-            
-            # Determine data type
+            if normalized_name in seen_names:
+                continue
+            seen_names.add(normalized_name)
             data_type = self._infer_data_type(variable)
-            
             columns.append(ColumnDefinition(
                 name=normalized_name,
                 data_type=data_type,
