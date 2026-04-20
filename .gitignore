@@ -14,11 +14,10 @@ ENV/
 .env.local
 .env.*.local
 
-# Database
+# Database files (keep structure, ignore data)
 *.db
 *.duckdb
 *.duckdb.wal
-data/
 
 # IDEs
 .vscode/
@@ -54,8 +53,9 @@ coverage/
 *.log
 logs/
 
-# Generated exports
-backend/exports/
+# Generated exports (keep structure, ignore files)
+backend/exports/*
+!backend/exports/.gitkeep
 
 # Docker
 docker-compose.override.yml
