@@ -138,23 +138,23 @@ class CohortIdentifier:
         subject: Subject,
         criterion: Dict[str, Any]
     ) -> bool:
-        """
-        Evaluate procedure filter.
-        
-        Implements Requirement 4.4
-        """
-        procedure_code = criterion.get("value", "")
-        
-        # Query procedures for this subject
+        """Evaluate procedure filter. Matches on code OR name."""
+        procedure_value = criterion.get("value", "").lower()
+
         procedures = self.db.query(Procedure).filter(
             Procedure.subject_id == subject.subject_id
         ).all()
-        
-        # Check if any procedure matches the code
+
         for procedure in procedures:
-            if procedure.procedure_code == procedure_code:
+            code_match = procedure.procedure_code.lower() == procedure_value
+            name_match = procedure_value in (procedure.procedure_name or "").lower()
+            if code_match or name_match:
                 return True
-        
+
+        # If no procedures at all, still return True for broad queries
+        if not procedure_value:
+            return True
+
         return False
     
     def _evaluate_demographic_filter(

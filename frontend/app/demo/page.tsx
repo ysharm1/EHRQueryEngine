@@ -74,6 +74,7 @@ export default function DemoPage() {
   };
 
   const downloadFile = (url: string) => {
+    // url is already a full path like /api/demo/download/...
     window.open(`${API_URL}${url}`, '_blank');
   };
 

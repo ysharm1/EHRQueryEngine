@@ -716,8 +716,35 @@ async def list_tables(
         )
 
 
-# Health Check Endpoint
-@router.get("/health", response_model=HealthResponse)
+@router.get("/demo/download/{dataset_id}")
+async def demo_download(
+    dataset_id: str,
+    file_name: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Public download endpoint for demo datasets."""
+    from app.models.metadata import DatasetMetadata
+
+    dataset = db.query(DatasetMetadata).filter(
+        DatasetMetadata.dataset_id == dataset_id
+    ).first()
+
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    if file_name:
+        file_path = next((p for p in dataset.file_paths if file_name in p), None)
+    else:
+        file_path = dataset.file_paths[0] if dataset.file_paths else None
+
+    if not file_path or not Path(file_path).exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    return FileResponse(
+        path=file_path,
+        filename=Path(file_path).name,
+        media_type="application/octet-stream"
+    )
 async def health_check():
     """Health check endpoint."""
     return HealthResponse(
@@ -754,12 +781,20 @@ async def demo_query(
 
     response = orchestrator.process_query(query_request)
 
+    # Rewrite download URLs to use the public demo download endpoint
+    public_urls = []
+    for url in response.download_urls:
+        # url is like /api/dataset/{id}/download?file_name=X
+        # rewrite to /api/demo/download/{id}?file_name=X
+        public_url = url.replace(f"/api/dataset/{response.dataset_id}/download", f"/api/demo/download/{response.dataset_id}")
+        public_urls.append(public_url)
+
     return QuerySubmitResponse(
         dataset_id=response.dataset_id,
         status=response.status.value,
         row_count=response.row_count,
         column_count=response.column_count,
-        download_urls=response.download_urls,
+        download_urls=public_urls,
         metadata=response.metadata,
         error_message=response.error_message,
     )

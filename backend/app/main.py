@@ -7,11 +7,15 @@ from app.database import engine, Base
 # Create database tables
 Base.metadata.create_all(bind=engine)
 
-# Run one-time startup tasks (password migration)
+# Run one-time startup tasks (password migration + sample data)
 try:
-    from app.init_db import migrate_passwords
+    from app.init_db import migrate_passwords, init_database, create_sample_data
+    init_database()
+    create_sample_data()
     migrate_passwords()
-except Exception:
+except Exception as e:
+    import logging
+    logging.getLogger(__name__).warning(f"Startup init warning: {e}")
     pass  # Never block startup
 
 app = FastAPI(
