@@ -187,6 +187,32 @@ class AuditLogService:
             user_agent=user_agent
         )
     
+    def log_pdf_extraction(
+        self,
+        user_id: Optional[str],
+        file_path: str,
+        file_hash: str,
+        patient_id: Optional[str],
+        records_extracted: int,
+        status: str,
+        error_message: Optional[str] = None,
+    ) -> str:
+        """Log a PDF extraction event for HIPAA audit trail."""
+        details = {
+            "file_path": file_path,
+            "file_hash": file_hash,
+            "patient_id": patient_id,
+            "records_extracted": records_extracted,
+            "action_type": "pdf_extraction",
+        }
+        return self._create_log_entry(
+            user_id=user_id,
+            action="pdf_extraction",
+            details=details,
+            status=status,
+            error_message=error_message,
+        )
+
     def _create_log_entry(
         self,
         user_id: Optional[str],

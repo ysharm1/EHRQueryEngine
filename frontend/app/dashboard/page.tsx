@@ -6,11 +6,14 @@ import ChatInterface from '@/components/chat-interface';
 import DatasetExplorer from '@/components/dataset-explorer';
 import DatasetExport from '@/components/dataset-export';
 import { DataUpload } from '@/components/data-upload';
+import ExtractionDashboard from '@/components/extraction-dashboard';
+import ExtractionConfig from '@/components/extraction-config';
 import { useAuth } from '@/lib/auth-context';
 
 export default function DashboardPage() {
   const [currentDatasetId, setCurrentDatasetId] = useState<string | null>(null);
   const [showUpload, setShowUpload] = useState(false);
+  const [activeTab, setActiveTab] = useState<'extraction' | 'config'>('extraction');
   const { user, logout } = useAuth();
 
   return (
@@ -56,6 +59,26 @@ export default function DashboardPage() {
         {/* Main Content */}
         <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
           <div className="space-y-8">
+            {/* Extraction Dashboard Tabs */}
+            <section>
+              <div className="flex gap-4 mb-6">
+                <button
+                  onClick={() => setActiveTab('extraction')}
+                  className={`px-4 py-2 rounded ${activeTab === 'extraction' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
+                >
+                  Extraction Dashboard
+                </button>
+                <button
+                  onClick={() => setActiveTab('config')}
+                  className={`px-4 py-2 rounded ${activeTab === 'config' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
+                >
+                  Configuration
+                </button>
+              </div>
+
+              {activeTab === 'extraction' ? <ExtractionDashboard /> : <ExtractionConfig />}
+            </section>
+
             {/* Data Upload Section */}
             {showUpload && (
               <section>
@@ -85,7 +108,7 @@ export default function DashboardPage() {
             )}
 
             {/* Help Section */}
-            {!currentDatasetId && !showUpload && (
+            {!currentDatasetId && !showUpload && activeTab === 'extraction' && (
               <section className="rounded-lg bg-white p-6 shadow">
                 <h2 className="mb-4 text-lg font-semibold text-gray-900">
                   Getting Started
@@ -150,3 +173,5 @@ export default function DashboardPage() {
     </ProtectedRoute>
   );
 }
+import ExtractionDashboard from '@/components/extraction-dashboard';
+import ExtractionConfig from '@/components/extraction-config';

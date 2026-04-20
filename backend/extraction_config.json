@@ -1,0 +1,15 @@
+{
+  "watched_folders": [],
+  "llm_provider": "openai",
+  "ocr_enabled": true,
+  "auto_process": true,
+  "extraction_hints": {
+    "facility": "",
+    "ehr_system": ""
+  },
+  "sync": {
+    "mode": "local_only",
+    "cloud_endpoint": null
+  },
+  "retention_days": 90
+}

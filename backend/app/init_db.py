@@ -30,7 +30,18 @@ def init_database():
     Base.metadata.create_all(bind=engine)
     
     logger.info("Database tables created successfully")
-    
+
+    # Initialize DuckDB extraction tables
+    from app.database import get_duckdb_connection
+    from app.services.extraction_schema import init_extraction_tables
+    try:
+        duckdb_conn = get_duckdb_connection()
+        init_extraction_tables(duckdb_conn)
+        duckdb_conn.close()
+        logger.info("DuckDB extraction tables initialized")
+    except Exception as e:
+        logger.warning(f"Could not initialize DuckDB extraction tables: {e}")
+
     # Create additional indexes for query optimization
     logger.info("Creating indexes...")
     

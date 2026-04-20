@@ -81,3 +81,48 @@ export const fhirService = {
     return response.data;
   },
 };
+
+// Extraction services
+export const extractionService = {
+  getStatus: async (): Promise<any> => {
+    const response = await apiClient.get('/api/extraction/status');
+    return response.data;
+  },
+
+  listJobs: async (limit: number = 50, status?: string): Promise<any> => {
+    const params = new URLSearchParams({ limit: limit.toString() });
+    if (status) params.append('status', status);
+    const response = await apiClient.get(`/api/extraction/jobs?${params}`);
+    return response.data;
+  },
+
+  getJob: async (jobId: string): Promise<any> => {
+    const response = await apiClient.get(`/api/extraction/jobs/${jobId}`);
+    return response.data;
+  },
+
+  processPdf: async (filePath: string): Promise<any> => {
+    const response = await apiClient.post('/api/extraction/process', { file_path: filePath });
+    return response.data;
+  },
+
+  retryJob: async (jobId: string): Promise<any> => {
+    const response = await apiClient.post(`/api/extraction/retry/${jobId}`);
+    return response.data;
+  },
+
+  getStats: async (): Promise<any> => {
+    const response = await apiClient.get('/api/extraction/stats');
+    return response.data;
+  },
+
+  getConfig: async (): Promise<any> => {
+    const response = await apiClient.get('/api/extraction/config');
+    return response.data;
+  },
+
+  updateConfig: async (config: any): Promise<any> => {
+    const response = await apiClient.put('/api/extraction/config', config);
+    return response.data;
+  },
+};

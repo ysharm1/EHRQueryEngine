@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.api.routes import router
+from app.api.extraction_routes import router as extraction_router
 from app.database import engine, Base
 
 # Create database tables
@@ -35,6 +36,7 @@ app.add_middleware(
 
 # Include API routes
 app.include_router(router, prefix="/api")
+app.include_router(extraction_router, prefix="/api")
 
 
 @app.get("/")

@@ -56,3 +56,24 @@ apiClient.interceptors.response.use(
 );
 
 export default apiClient;
+
+// Helper functions for API calls
+export const apiGet = async (endpoint: string) => {
+  const response = await apiClient.get(endpoint);
+  return response.data;
+};
+
+export const apiPost = async (endpoint: string, data: any) => {
+  const response = await apiClient.post(endpoint, data);
+  return response.data;
+};
+
+export const apiPut = async (endpoint: string, data: any) => {
+  const response = await apiClient.put(endpoint, data);
+  return response.data;
+};
+
+export const apiDelete = async (endpoint: string) => {
+  const response = await apiClient.delete(endpoint);
+  return response.data;
+};
