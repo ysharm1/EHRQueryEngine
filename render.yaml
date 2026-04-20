@@ -8,6 +8,9 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: python -m app.init_db && uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 4
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+    envVars:
       - key: JWT_SECRET_KEY
         generateValue: true
       - key: DUCKDB_PATH
