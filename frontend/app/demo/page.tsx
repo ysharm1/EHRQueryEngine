@@ -21,6 +21,10 @@ interface QueryResult {
   download_urls: string[];
   metadata: any;
   error_message?: string;
+  preview_data?: {
+    rows: any[][];
+    columns: string[];
+  };
 }
 
 interface PublicDataset {
@@ -100,7 +104,27 @@ export default function DemoPage() {
 
       const queryRes = results[0];
       if (queryRes.status === 'fulfilled') {
-        setResult(queryRes.value.data);
+        const queryData = queryRes.value.data;
+        setResult(queryData);
+        
+        // Fetch preview data if query was successful
+        if (queryData.dataset_id && queryData.row_count > 0) {
+          try {
+            const previewRes = await axios.get(`${API_URL}/api/demo/download/${queryData.dataset_id}?file_name=data.csv`);
+            // Parse CSV preview (first 50 rows)
+            const csvText = previewRes.data;
+            const lines = csvText.split('\n').filter((l: string) => l.trim());
+            if (lines.length > 0) {
+              const columns = lines[0].split(',').map((c: string) => c.trim().replace(/^"|"$/g, ''));
+              const rows = lines.slice(1, 51).map((line: string) => 
+                line.split(',').map((cell: string) => cell.trim().replace(/^"|"$/g, ''))
+              );
+              setResult(prev => prev ? { ...prev, preview_data: { columns, rows } } : prev);
+            }
+          } catch (err) {
+            console.error('Failed to fetch preview:', err);
+          }
+        }
       } else {
         const err = (queryRes as PromiseRejectedResult).reason;
         setError(err?.response?.data?.detail || 'Query failed. Please try again.');
@@ -410,6 +434,42 @@ export default function DemoPage() {
                             );
                           })}
                         </div>
+                      </div>
+                    )}
+
+                    {result.preview_data && result.preview_data.rows.length > 0 && (
+                      <div className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs text-white/40 uppercase tracking-widest">Data Preview</p>
+                          <p className="text-xs text-white/30">Showing first {result.preview_data.rows.length} of {result.row_count} rows</p>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="border-b border-white/10">
+                                {result.preview_data.columns.map((col, i) => (
+                                  <th key={i} className="text-left px-3 py-2 text-white/60 font-medium whitespace-nowrap">
+                                    {col}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {result.preview_data.rows.map((row, i) => (
+                                <tr key={i} className="border-b border-white/5 hover:bg-white/5">
+                                  {row.map((cell, j) => (
+                                    <td key={j} className="px-3 py-2 text-white/70 whitespace-nowrap">
+                                      {cell || '—'}
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        <p className="text-xs text-white/30 text-center">
+                          Download the full dataset above to access all {result.row_count.toLocaleString()} rows
+                        </p>
                       </div>
                     )}
                   </>
