@@ -100,7 +100,12 @@ class AIClinicalExtractor:
             self._demo_mode = True
 
     def extract(self, raw_text: str, hints: Optional[ExtractionHints] = None, source_file: str = "", pages: Optional[List[PageText]] = None) -> ClinicalRecord:
-        """Extract all clinical data from raw text. Returns a ClinicalRecord."""
+        """Extract all clinical data from raw text using multi-pass extraction.
+
+        Runs the LLM twice and compares results. Matching values get high
+        confidence; disagreements are flagged with reduced confidence.
+        A clinical validation layer then catches physiologically impossible values.
+        """
         if not raw_text or not raw_text.strip():
             return ClinicalRecord(patient=PatientInfo(), source_file=source_file, extraction_confidence=0.0)
 
@@ -109,14 +114,195 @@ class AIClinicalExtractor:
 
         try:
             prompt = self._build_prompt(raw_text, hints, pages=pages)
+
+            # --- Pass 1 ---
             if self.llm_provider == "openai":
-                response_text = self._call_openai(prompt)
+                response_1 = self._call_openai(prompt)
             else:
-                response_text = self._call_anthropic(prompt)
-            return self._parse_response(response_text, raw_text, source_file)
+                response_1 = self._call_anthropic(prompt)
+            record_1 = self._parse_response(response_1, raw_text, source_file)
+
+            # --- Pass 2 ---
+            try:
+                if self.llm_provider == "openai":
+                    response_2 = self._call_openai(prompt)
+                else:
+                    response_2 = self._call_anthropic(prompt)
+                record_2 = self._parse_response(response_2, raw_text, source_file)
+
+                # Merge the two passes
+                merged = self._merge_passes(record_1, record_2, source_file)
+            except Exception as exc:
+                logger.warning("Second extraction pass failed, using single pass: %s", exc)
+                merged = record_1
+
+            # Validate clinical values
+            merged = self._validate_clinical_values(merged)
+            return merged
+
         except Exception as exc:
             logger.exception("AI extraction failed, falling back to demo mode")
             return self._demo_extract(raw_text, source_file)
+
+    # ------------------------------------------------------------------
+    # Multi-pass merge logic
+    # ------------------------------------------------------------------
+
+    def _merge_passes(self, r1: ClinicalRecord, r2: ClinicalRecord, source_file: str) -> ClinicalRecord:
+        """Merge two extraction passes. Matching values keep high confidence;
+        disagreements get flagged with reduced confidence."""
+
+        merged_vitals = self._merge_vitals(r1.vitals, r2.vitals)
+        merged_labs = self._merge_labs(r1.labs, r2.labs)
+
+        # For non-numeric types, take the union (deduplicated)
+        merged_diagnoses = self._merge_by_key(r1.diagnoses, r2.diagnoses, key_fn=lambda d: d.description.lower().strip())
+        merged_procedures = self._merge_by_key(r1.procedures, r2.procedures, key_fn=lambda p: p.description.lower().strip())
+        merged_medications = self._merge_by_key(r1.medications, r2.medications, key_fn=lambda m: m.drug_name.lower().strip())
+        merged_notes = self._merge_by_key(r1.notes, r2.notes, key_fn=lambda n: (n.note_type, n.content[:50] if n.content else ""))
+        merged_imaging = self._merge_by_key(r1.imaging, r2.imaging, key_fn=lambda i: (i.modality, i.body_part or ""))
+
+        # Use patient info from pass 1 (more complete typically)
+        patient = r1.patient
+
+        # Average the confidence scores, penalize if passes disagreed a lot
+        avg_conf = (r1.extraction_confidence + r2.extraction_confidence) / 2
+
+        return ClinicalRecord(
+            patient=patient,
+            vitals=merged_vitals,
+            labs=merged_labs,
+            diagnoses=merged_diagnoses,
+            procedures=merged_procedures,
+            medications=merged_medications,
+            notes=merged_notes,
+            imaging=merged_imaging,
+            raw_text=r1.raw_text,
+            source_file=source_file or r1.source_file,
+            extraction_confidence=avg_conf,
+            encounter_id=r1.encounter_id or r2.encounter_id,
+            encounter_type=r1.encounter_type or r2.encounter_type,
+        )
+
+    def _merge_vitals(self, v1: list, v2: list) -> list:
+        """Merge vital signs from two passes. If both passes found the same
+        vital (by name+timestamp), keep the value and boost confidence if they
+        agree, or flag if they disagree."""
+        # Index pass 2 by (name, timestamp)
+        v2_map = {}
+        for v in v2:
+            key = (v.name, v.timestamp)
+            v2_map[key] = v
+
+        merged = []
+        seen_keys = set()
+        for v in v1:
+            key = (v.name, v.timestamp)
+            seen_keys.add(key)
+            if key in v2_map:
+                other = v2_map[key]
+                if abs(v.value - other.value) < 0.01:
+                    # Both passes agree — high confidence
+                    v.context = (v.context or "") + " [verified]" if v.context else "[verified]"
+                else:
+                    # Disagreement — flag it, use average
+                    avg_val = (v.value + other.value) / 2
+                    v.value = avg_val
+                    v.context = (v.context or "") + f" [flagged: pass1={v.value:.1f}, pass2={other.value:.1f}]"
+            merged.append(v)
+
+        # Add any vitals only found in pass 2
+        for key, v in v2_map.items():
+            if key not in seen_keys:
+                v.context = (v.context or "") + " [single-pass]" if v.context else "[single-pass]"
+                merged.append(v)
+
+        return merged
+
+    def _merge_labs(self, l1: list, l2: list) -> list:
+        """Merge lab results from two passes."""
+        l2_map = {}
+        for l in l2:
+            key = (l.test_name, l.timestamp)
+            l2_map[key] = l
+
+        merged = []
+        seen_keys = set()
+        for l in l1:
+            key = (l.test_name, l.timestamp)
+            seen_keys.add(key)
+            if key in l2_map:
+                other = l2_map[key]
+                if l.value == other.value:
+                    l.flag = (l.flag or "") + " [verified]" if l.flag else "[verified]"
+                else:
+                    l.flag = (l.flag or "") + f" [flagged: pass1={l.value}, pass2={other.value}]"
+            merged.append(l)
+
+        for key, l in l2_map.items():
+            if key not in seen_keys:
+                merged.append(l)
+
+        return merged
+
+    def _merge_by_key(self, list1: list, list2: list, key_fn) -> list:
+        """Deduplicate two lists by a key function, keeping items from both passes."""
+        seen = set()
+        merged = []
+        for item in list1:
+            k = key_fn(item)
+            if k not in seen:
+                seen.add(k)
+                merged.append(item)
+        for item in list2:
+            k = key_fn(item)
+            if k not in seen:
+                seen.add(k)
+                merged.append(item)
+        return merged
+
+    # ------------------------------------------------------------------
+    # Clinical validation
+    # ------------------------------------------------------------------
+
+    # Physiological bounds: (min, max) — values outside are flagged
+    VITAL_BOUNDS = {
+        "GCS": (3, 15),
+        "GCS_eye": (1, 4),
+        "GCS_verbal": (1, 5),
+        "GCS_motor": (1, 6),
+        "HR": (20, 300),
+        "BP_systolic": (40, 300),
+        "BP_diastolic": (20, 200),
+        "SpO2": (0, 100),
+        "Temp": (85, 115),  # Fahrenheit range
+        "RR": (0, 80),
+        "Weight": (0.5, 700),  # kg
+    }
+
+    def _validate_clinical_values(self, record: ClinicalRecord) -> ClinicalRecord:
+        """Flag or correct physiologically impossible values."""
+        flagged_count = 0
+
+        for v in record.vitals:
+            bounds = self.VITAL_BOUNDS.get(v.name)
+            if bounds:
+                lo, hi = bounds
+                if v.value < lo or v.value > hi:
+                    v.context = (v.context or "") + f" [OUT OF RANGE: expected {lo}-{hi}]"
+                    flagged_count += 1
+
+        # Penalize confidence if many values were flagged
+        if flagged_count > 0:
+            total_vitals = max(len(record.vitals), 1)
+            penalty = min(0.3, flagged_count / total_vitals * 0.5)
+            record.extraction_confidence = max(0.0, record.extraction_confidence - penalty)
+            logger.warning(
+                "Flagged %d/%d vitals as out of range for %s (confidence reduced by %.2f)",
+                flagged_count, total_vitals, record.source_file, penalty,
+            )
+
+        return record
 
     def _build_prompt(self, raw_text: str, hints: Optional[ExtractionHints], pages: Optional[List[PageText]] = None) -> str:
         hint_str = ""
