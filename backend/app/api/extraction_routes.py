@@ -1,10 +1,11 @@
 """Extraction API routes."""
 import json
 import os
+import shutil
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -12,6 +13,10 @@ from app.database import get_db, get_duckdb_connection
 from app.services.auth import get_current_user
 from app.services.extraction_manager import ExtractionManager
 from app.models.user import User
+
+# Directory for uploaded PDFs — uses Render persistent disk or local fallback
+PDF_UPLOAD_DIR = os.environ.get("PDF_UPLOAD_DIR", "/var/data/pdfs")
+MAX_UPLOAD_SIZE_MB = 50
 
 router = APIRouter(prefix="/extraction", tags=["extraction"])
 
@@ -116,6 +121,60 @@ async def process_pdf(
         manager = _get_manager(conn)
         job = manager.process_pdf(request.file_path)
         return {"job_id": job.job_id, "status": job.status, "file_name": job.file_name}
+    finally:
+        conn.close()
+
+
+@router.post("/upload")
+async def upload_pdf(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """Upload a PDF file and trigger extraction.
+
+    Saves the file to persistent disk and runs the full extraction pipeline:
+    parse → AI extract → store in DuckDB with encounter + provenance tracking.
+    """
+    # Validate file type
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are accepted")
+
+    # Validate file size (read content once)
+    contents = await file.read()
+    if len(contents) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large. Maximum size is {MAX_UPLOAD_SIZE_MB}MB",
+        )
+    if len(contents) == 0:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    # Ensure upload directory exists
+    upload_dir = Path(PDF_UPLOAD_DIR)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save file (add timestamp prefix to avoid collisions)
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_name = file.filename.replace(" ", "_").replace("/", "_")
+    dest_path = upload_dir / f"{timestamp}_{safe_name}"
+
+    with open(dest_path, "wb") as f:
+        f.write(contents)
+
+    # Run extraction pipeline
+    conn = get_duckdb_connection()
+    try:
+        manager = _get_manager(conn)
+        job = manager.process_pdf(str(dest_path))
+        return {
+            "job_id": job.job_id,
+            "status": job.status,
+            "file_name": job.file_name,
+            "records_extracted": job.records_extracted,
+            "confidence": job.confidence,
+            "error_message": job.error_message,
+        }
     finally:
         conn.close()
 
