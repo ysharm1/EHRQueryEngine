@@ -31,9 +31,16 @@ export default function ExtractionDashboard() {
   const [stats, setStats] = useState<ExtractionStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [uploadResult, setUploadResult] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+
+  // Batch upload state
+  interface UploadItem {
+    file: File;
+    status: 'pending' | 'uploading' | 'completed' | 'failed';
+    message: string;
+  }
+  const [uploadQueue, setUploadQueue] = useState<UploadItem[]>([]);
+  const [isProcessingQueue, setIsProcessingQueue] = useState(false);
 
   const fetchJobs = async () => {
     try {
@@ -53,55 +60,94 @@ export default function ExtractionDashboard() {
     }
   };
 
-  const handleUpload = async (file: File) => {
-    if (!file.name.toLowerCase().endsWith('.pdf')) {
-      setUploadResult('Only PDF files are accepted');
-      return;
-    }
-    setUploading(true);
-    setUploadResult(null);
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/extraction/upload`,
-        {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` },
-          body: formData,
+  const handleUpload = async (files: File[]) => {
+    const pdfFiles = files.filter((f) => f.name.toLowerCase().endsWith('.pdf'));
+    if (pdfFiles.length === 0) return;
+
+    const newItems: UploadItem[] = pdfFiles.map((file) => ({
+      file,
+      status: 'pending' as const,
+      message: 'Waiting…',
+    }));
+
+    setUploadQueue((prev) => [...prev, ...newItems]);
+  };
+
+  // Process queue sequentially
+  useEffect(() => {
+    const pendingIdx = uploadQueue.findIndex((item) => item.status === 'pending');
+    if (pendingIdx === -1 || isProcessingQueue) return;
+
+    setIsProcessingQueue(true);
+
+    const processItem = async () => {
+      // Mark as uploading
+      setUploadQueue((prev) =>
+        prev.map((item, i) =>
+          i === pendingIdx ? { ...item, status: 'uploading' as const, message: 'Extracting…' } : item
+        )
+      );
+
+      try {
+        const formData = new FormData();
+        formData.append('file', uploadQueue[pendingIdx].file);
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/extraction/upload`,
+          {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` },
+            body: formData,
+          }
+        );
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({ detail: 'Upload failed' }));
+          throw new Error(err.detail || 'Upload failed');
         }
-      );
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({ detail: 'Upload failed' }));
-        throw new Error(err.detail || 'Upload failed');
+        const data = await response.json();
+        const msg =
+          data.status === 'completed'
+            ? `${data.records_extracted} records (${(data.confidence * 100).toFixed(0)}%)`
+            : data.status === 'failed'
+            ? `Failed: ${data.error_message}`
+            : data.status;
+
+        setUploadQueue((prev) =>
+          prev.map((item, i) =>
+            i === pendingIdx
+              ? { ...item, status: data.status === 'failed' ? 'failed' : 'completed', message: msg }
+              : item
+          )
+        );
+      } catch (err: any) {
+        setUploadQueue((prev) =>
+          prev.map((item, i) =>
+            i === pendingIdx ? { ...item, status: 'failed' as const, message: err.message || 'Failed' } : item
+          )
+        );
+      } finally {
+        setIsProcessingQueue(false);
+        fetchJobs();
+        fetchStats();
       }
-      const data = await response.json();
-      setUploadResult(
-        data.status === 'completed'
-          ? `Extracted ${data.records_extracted} records (${(data.confidence * 100).toFixed(0)}% confidence)`
-          : data.status === 'failed'
-          ? `Extraction failed: ${data.error_message}`
-          : `Processing: ${data.status}`
-      );
-      fetchJobs();
-      fetchStats();
-    } catch (err: any) {
-      setUploadResult(err.message || 'Upload failed');
-    } finally {
-      setUploading(false);
-    }
+    };
+
+    processItem();
+  }, [uploadQueue, isProcessingQueue]);
+
+  const clearCompleted = () => {
+    setUploadQueue((prev) => prev.filter((item) => item.status === 'pending' || item.status === 'uploading'));
   };
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    const file = e.dataTransfer.files[0];
-    if (file) handleUpload(file);
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) handleUpload(files);
   };
 
   const onFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) handleUpload(file);
+    const files = Array.from(e.target.files || []);
+    if (files.length > 0) handleUpload(files);
     e.target.value = '';
   };
 
@@ -145,33 +191,61 @@ export default function ExtractionDashboard() {
           </svg>
           <div>
             <p className="text-lg font-medium text-gray-700">
-              {uploading ? 'Processing PDF…' : 'Drop a clinical PDF here'}
+              {isProcessingQueue ? 'Processing PDFs…' : 'Drop clinical PDFs here'}
             </p>
-            <p className="text-sm text-gray-500 mt-1">or click to select a file (max 50MB)</p>
+            <p className="text-sm text-gray-500 mt-1">Select one or multiple PDF files (max 50MB each)</p>
           </div>
           <input
             type="file"
             accept=".pdf"
+            multiple
             onChange={onFileSelect}
-            disabled={uploading}
+            disabled={isProcessingQueue}
             className="hidden"
             id="pdf-upload"
           />
           <label
             htmlFor="pdf-upload"
             className={`inline-block px-6 py-2 rounded-md text-sm font-medium cursor-pointer ${
-              uploading
+              isProcessingQueue
                 ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                 : 'bg-blue-600 text-white hover:bg-blue-700'
             }`}
           >
-            {uploading ? 'Extracting…' : 'Select PDF'}
+            {isProcessingQueue ? 'Processing…' : 'Select PDFs'}
           </label>
         </div>
-        {uploadResult && (
-          <p className={`mt-3 text-sm ${uploadResult.includes('failed') || uploadResult.includes('Only') ? 'text-red-600' : 'text-green-600'}`}>
-            {uploadResult}
-          </p>
+
+        {/* Batch progress */}
+        {uploadQueue.length > 0 && (
+          <div className="mt-4 text-left max-h-48 overflow-y-auto">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-medium text-gray-500">
+                {uploadQueue.filter((i) => i.status === 'completed').length}/{uploadQueue.length} completed
+              </span>
+              {uploadQueue.every((i) => i.status === 'completed' || i.status === 'failed') && (
+                <button onClick={clearCompleted} className="text-xs text-blue-600 hover:underline">
+                  Clear
+                </button>
+              )}
+            </div>
+            {uploadQueue.map((item, idx) => (
+              <div key={idx} className="flex items-center gap-3 py-1.5 border-t border-gray-100 text-sm">
+                <span className="flex-shrink-0">
+                  {item.status === 'pending' && <span className="text-gray-400">⏳</span>}
+                  {item.status === 'uploading' && <span className="text-yellow-500 animate-pulse">⚙️</span>}
+                  {item.status === 'completed' && <span className="text-green-600">✓</span>}
+                  {item.status === 'failed' && <span className="text-red-600">✗</span>}
+                </span>
+                <span className="truncate flex-1 text-gray-700">{item.file.name}</span>
+                <span className={`text-xs flex-shrink-0 ${
+                  item.status === 'failed' ? 'text-red-600' : item.status === 'completed' ? 'text-green-600' : 'text-gray-400'
+                }`}>
+                  {item.message}
+                </span>
+              </div>
+            ))}
+          </div>
         )}
       </div>
 
