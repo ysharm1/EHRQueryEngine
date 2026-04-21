@@ -12,11 +12,13 @@ from app.services.clinical_models import (
 )
 from app.services.clinical_data_mapper import ClinicalDataMapper
 from app.services.extraction_schema import init_extraction_tables
+from app.services.schema_migration import run_clinical_schema_migration
 
 
 def make_conn():
     conn = duckdb.connect(":memory:")
     init_extraction_tables(conn)
+    run_clinical_schema_migration(conn)
     return conn
 
 

@@ -37,6 +37,11 @@ def init_database():
     try:
         duckdb_conn = get_duckdb_connection()
         init_extraction_tables(duckdb_conn)
+
+        # Run Clinical Query Intelligence schema migration (idempotent)
+        from app.services.schema_migration import run_clinical_schema_migration
+        run_clinical_schema_migration(duckdb_conn)
+
         duckdb_conn.close()
         logger.info("DuckDB extraction tables initialized")
     except Exception as e:

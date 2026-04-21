@@ -7,6 +7,13 @@ import type {
   Dataset,
   ExportResponse,
   User,
+  ClinicalQueryFilters,
+  ClinicalQueryResponse,
+  AggregateRequest,
+  AggregateResponse,
+  Encounter,
+  EncounterSummary,
+  ProvenanceDetail,
 } from '@/types';
 
 // Authentication services
@@ -124,5 +131,42 @@ export const extractionService = {
   updateConfig: async (config: any): Promise<any> => {
     const response = await apiClient.put('/api/extraction/config', config);
     return response.data;
+  },
+};
+
+// Clinical Query services
+export const clinicalQueryService = {
+  query: async (filters: ClinicalQueryFilters): Promise<ClinicalQueryResponse> => {
+    const response = await apiClient.post<ClinicalQueryResponse>('/api/clinical/query', filters);
+    return response.data;
+  },
+
+  aggregate: async (request: AggregateRequest): Promise<AggregateResponse> => {
+    const response = await apiClient.post<AggregateResponse>('/api/clinical/aggregate', request);
+    return response.data;
+  },
+
+  getEncounters: async (patientId: string, dateFrom?: string, dateTo?: string): Promise<{ encounters: Encounter[]; total: number }> => {
+    const params = new URLSearchParams();
+    if (dateFrom) params.append('date_from', dateFrom);
+    if (dateTo) params.append('date_to', dateTo);
+    const query = params.toString() ? `?${params}` : '';
+    const response = await apiClient.get<{ encounters: Encounter[]; total: number }>(`/api/clinical/encounters/${patientId}${query}`);
+    return response.data;
+  },
+
+  getEncounterSummary: async (encounterId: string): Promise<EncounterSummary> => {
+    const response = await apiClient.get<EncounterSummary>(`/api/clinical/encounters/${encounterId}/summary`);
+    return response.data;
+  },
+
+  getProvenance: async (provenanceId: string): Promise<ProvenanceDetail> => {
+    const response = await apiClient.get<ProvenanceDetail>(`/api/clinical/provenance/${provenanceId}`);
+    return response.data;
+  },
+
+  getProviderTypes: async (): Promise<string[]> => {
+    const response = await apiClient.get<{ provider_types: string[] }>('/api/clinical/providers');
+    return response.data.provider_types;
   },
 };

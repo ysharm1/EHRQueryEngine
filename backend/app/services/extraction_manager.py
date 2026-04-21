@@ -102,20 +102,30 @@ class ExtractionManager:
                 job.retry_count = attempt
                 self._persist_job(job)
 
-                # Step 1: Parse PDF
+                # Step 1: Parse PDF (returns ParsedPDFWithPages)
                 parser = PDFParser()
                 parsed = parser.extract_text(job.file_path)
                 if parsed.extraction_method == "failed":
                     raise ValueError(f"PDF parsing failed: {parsed.error}")
 
-                # Step 2: AI extraction
+                # Step 2: AI extraction with per-page text
                 extractor = AIClinicalExtractor(llm_provider=self._llm_provider)
-                record = extractor.extract(parsed.raw_text, source_file=job.file_path)
+                pages = getattr(parsed, 'pages', None)
+                record = extractor.extract(
+                    parsed.raw_text,
+                    source_file=job.file_path,
+                    pages=pages,
+                )
 
-                # Step 3: Map to DuckDB
+                # Step 3: Map to DuckDB with extraction_job_id for provenance
                 if self._conn:
                     mapper = ClinicalDataMapper()
-                    patient_id = mapper.map_and_insert(self._conn, record, source_file=job.file_path)
+                    patient_id = mapper.map_and_insert(
+                        self._conn,
+                        record,
+                        source_file=job.file_path,
+                        extraction_job_id=job.job_id,
+                    )
                     job.patient_id = patient_id
 
                 # Count records

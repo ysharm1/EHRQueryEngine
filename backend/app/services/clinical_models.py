@@ -10,6 +10,9 @@ class VitalSign:
     unit: str
     timestamp: Optional[str] = None
     context: Optional[str] = None  # "on admission", "post-op"
+    source_page: Optional[int] = None
+    provider_name: Optional[str] = None
+    provider_type: Optional[str] = None
 
 
 @dataclass
@@ -20,6 +23,9 @@ class LabResult:
     reference_range: Optional[str] = None
     flag: Optional[str] = None   # "H", "L", "Critical"
     timestamp: Optional[str] = None
+    source_page: Optional[int] = None
+    provider_name: Optional[str] = None
+    provider_type: Optional[str] = None
 
 
 @dataclass
@@ -28,6 +34,9 @@ class Diagnosis:
     icd_code: Optional[str] = None
     diagnosis_type: str = "secondary"  # "primary" | "secondary" | "history"
     timestamp: Optional[str] = None
+    source_page: Optional[int] = None
+    provider_name: Optional[str] = None
+    provider_type: Optional[str] = None
 
 
 @dataclass
@@ -36,6 +45,9 @@ class Procedure:
     cpt_code: Optional[str] = None
     procedure_date: Optional[str] = None
     provider: Optional[str] = None
+    source_page: Optional[int] = None
+    provider_name: Optional[str] = None
+    provider_type: Optional[str] = None
 
 
 @dataclass
@@ -46,6 +58,9 @@ class Medication:
     frequency: Optional[str] = None
     start_date: Optional[str] = None
     end_date: Optional[str] = None
+    source_page: Optional[int] = None
+    provider_name: Optional[str] = None
+    provider_type: Optional[str] = None
 
 
 @dataclass
@@ -54,6 +69,9 @@ class ClinicalNote:
     content: str
     author: Optional[str] = None
     recorded_at: Optional[str] = None
+    source_page: Optional[int] = None
+    provider_name: Optional[str] = None
+    provider_type: Optional[str] = None
 
 
 @dataclass
@@ -63,6 +81,9 @@ class ImagingReport:
     findings: Optional[str] = None
     impression: Optional[str] = None
     report_date: Optional[str] = None
+    source_page: Optional[int] = None
+    provider_name: Optional[str] = None
+    provider_type: Optional[str] = None
 
 
 @dataclass
@@ -99,3 +120,5 @@ class ClinicalRecord:
     raw_text: str = ""
     source_file: str = ""
     extraction_confidence: float = 0.0
+    encounter_id: Optional[str] = None
+    encounter_type: Optional[str] = None

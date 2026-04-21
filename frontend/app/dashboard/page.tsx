@@ -33,6 +33,12 @@ export default function DashboardPage() {
               </div>
               
               <div className="flex items-center space-x-4">
+                <a
+                  href="/clinical-query"
+                  className="rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700"
+                >
+                  Clinical Query
+                </a>
                 <button
                   onClick={() => setShowUpload(!showUpload)}
                   className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
@@ -173,5 +179,3 @@ export default function DashboardPage() {
     </ProtectedRoute>
   );
 }
-import ExtractionDashboard from '@/components/extraction-dashboard';
-import ExtractionConfig from '@/components/extraction-config';

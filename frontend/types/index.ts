@@ -108,3 +108,100 @@ export interface ExportResponse {
   format: ExportFormat;
   files?: ExportFile[];
 }
+
+// Clinical Query types
+
+export interface Encounter {
+  encounter_id: string;
+  patient_id: string;
+  encounter_date: string | null;
+  encounter_type: string | null;
+  primary_provider: string | null;
+  primary_provider_type: string | null;
+  facility: string | null;
+  source_file: string | null;
+  data_point_count: number;
+  created_at: string;
+}
+
+export interface ClinicalQueryFilters {
+  patient_id?: string;
+  encounter_id?: string;
+  date_from?: string;
+  date_to?: string;
+  provider_types?: string[];
+  data_types?: string[];
+  vital_names?: string[];
+  lab_names?: string[];
+  limit?: number;
+  offset?: number;
+}
+
+export interface ClinicalQueryResponse {
+  rows: Record<string, unknown>[];
+  total_count: number;
+  provenance_refs: Record<string, string>;
+}
+
+export interface AggregateRequest {
+  patient_id?: string;
+  encounter_id?: string;
+  date_from?: string;
+  date_to?: string;
+  provider_types?: string[];
+  metric_name: string;
+  data_type: string;
+  aggregations: string[];
+  group_by: string;
+}
+
+export interface AggregatedMetric {
+  group_key: string;
+  group_label: string;
+  metric_name: string;
+  encounter_date: string | null;
+  encounter_type: string | null;
+  min: number | null;
+  max: number | null;
+  avg: number | null;
+  first: number | null;
+  last: number | null;
+  count: number;
+  provenance_ids: string[];
+}
+
+export interface AggregateResponse {
+  groups: AggregatedMetric[];
+}
+
+export interface ProvenanceDetail {
+  provenance_id: string;
+  data_record_id: string;
+  data_table: string;
+  source_file: string;
+  page_number: number | null;
+  provider_name: string | null;
+  provider_type: string | null;
+  extraction_confidence: number;
+  extraction_job_id: string;
+  raw_snippet: string | null;
+  created_at: string;
+}
+
+export interface EncounterSummary {
+  encounter_id: string;
+  patient_id: string;
+  encounter_date: string | null;
+  encounter_type: string | null;
+  primary_provider: string | null;
+  primary_provider_type: string | null;
+  facility: string | null;
+  vitals: Record<string, unknown>[];
+  labs: Record<string, unknown>[];
+  diagnoses: Record<string, unknown>[];
+  procedures: Record<string, unknown>[];
+  medications: Record<string, unknown>[];
+  notes: Record<string, unknown>[];
+  imaging: Record<string, unknown>[];
+  provenance: ProvenanceDetail[];
+}
