@@ -565,17 +565,23 @@ async def upload_data(
         # Connect to DuckDB
         conn = get_duckdb_connection()
         
+        # Sanitize DataFrame for DuckDB compatibility:
+        # Convert object columns to string to avoid type inference issues
+        for col in df.columns:
+            if df[col].dtype == 'object':
+                df[col] = df[col].astype(str).replace('nan', None)
+        
         # Check if table exists
         existing_tables = conn.execute("SHOW TABLES").fetchall()
         table_exists = any(table_name == t[0] for t in existing_tables)
         
         if table_exists:
             # Append to existing table
-            conn.execute(f"INSERT INTO {table_name} SELECT * FROM df")
+            conn.execute(f"INSERT INTO \"{table_name}\" SELECT * FROM df")
             action = "appended"
         else:
             # Create new table
-            conn.execute(f"CREATE TABLE {table_name} AS SELECT * FROM df")
+            conn.execute(f"CREATE TABLE \"{table_name}\" AS SELECT * FROM df")
             action = "created"
         
         conn.close()
@@ -812,12 +818,17 @@ async def demo_upload(
         detector = SmartSchemaDetector()
         detected_schema = detector.detect_schema(df)
 
+        # Sanitize DataFrame for DuckDB compatibility
+        for col in df.columns:
+            if df[col].dtype == 'object':
+                df[col] = df[col].astype(str).replace('nan', None)
+
         # Load into DuckDB
         conn = get_duckdb_connection()
         existing = [t[0] for t in conn.execute("SHOW TABLES").fetchall()]
         if table_name in existing:
-            conn.execute(f"DROP TABLE {table_name}")
-        conn.execute(f"CREATE TABLE {table_name} AS SELECT * FROM df")
+            conn.execute(f"DROP TABLE \"{table_name}\"")
+        conn.execute(f"CREATE TABLE \"{table_name}\" AS SELECT * FROM df")
         conn.close()
 
         return {
