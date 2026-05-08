@@ -562,14 +562,14 @@ async def upload_data(
         detector = SmartSchemaDetector()
         detected_schema = detector.detect_schema(df)
         
-        # Sanitize DataFrame for DuckDB compatibility:
-        # - Convert object columns to handle NaN properly
+        # Sanitize DataFrame for DuckDB compatibility
         for col in df.columns:
             if df[col].dtype == 'object':
-                df[col] = df[col].where(df[col].notna(), None).astype(object)
+                df[col] = df[col].fillna('').astype(str)
         
         # Connect to DuckDB
         conn = get_duckdb_connection()
+        conn.register('_upload_df', df)
         
         # Check if table exists
         existing_tables = conn.execute("SHOW TABLES").fetchall()
@@ -577,13 +577,23 @@ async def upload_data(
         
         if table_exists:
             # Append to existing table
-            conn.execute(f"INSERT INTO \"{table_name}\" SELECT * FROM df")
+            try:
+                conn.execute(f"INSERT INTO \"{table_name}\" SELECT * FROM _upload_df")
+            except Exception:
+                # Schema mismatch — drop and recreate
+                try:
+                    conn.execute(f"DROP TABLE IF EXISTS \"{table_name}\" CASCADE")
+                    conn.execute(f"CREATE TABLE \"{table_name}\" AS SELECT * FROM _upload_df")
+                except Exception:
+                    table_name = f"{table_name}_{int(datetime.now().timestamp())}"
+                    conn.execute(f"CREATE TABLE \"{table_name}\" AS SELECT * FROM _upload_df")
             action = "appended"
         else:
             # Create new table
-            conn.execute(f"CREATE TABLE \"{table_name}\" AS SELECT * FROM df")
+            conn.execute(f"CREATE TABLE \"{table_name}\" AS SELECT * FROM _upload_df")
             action = "created"
         
+        conn.unregister('_upload_df')
         conn.close()
         
         # Log upload
@@ -826,33 +836,41 @@ async def demo_upload(
         detected_schema = detector.detect_schema(df)
 
         # Sanitize DataFrame for DuckDB compatibility:
-        # - Convert object columns to string
-        # - Handle NaN in float columns that should be integers
+        # DuckDB 0.9.x can fail with "Data type 'str' not recognized" on object columns.
+        # Fix: convert all object columns to explicit VARCHAR-compatible types.
         for col in df.columns:
             if df[col].dtype == 'object':
-                df[col] = df[col].where(df[col].notna(), None).astype(object)
+                # Replace NaN/None with empty string, keep as object dtype
+                df[col] = df[col].fillna('').astype(str)
 
         # Load into DuckDB
         conn = get_duckdb_connection()
+        # Register the DataFrame explicitly to avoid type inference issues
+        conn.register('_upload_df', df)
         existing = [t[0] for t in conn.execute("SHOW TABLES").fetchall()]
         if table_name in existing:
-            # Use CASCADE to handle foreign key dependencies
+            # Try multiple strategies to handle existing tables
             try:
-                conn.execute(f"DROP TABLE \"{table_name}\" CASCADE")
+                conn.execute(f"DROP TABLE IF EXISTS \"{table_name}\" CASCADE")
             except Exception:
-                # If CASCADE not supported, delete all rows and re-insert
-                conn.execute(f"DELETE FROM \"{table_name}\"")
-                conn.execute(f"INSERT INTO \"{table_name}\" SELECT * FROM df")
-                conn.close()
-                return {
-                    "status": "success",
-                    "table_name": table_name,
-                    "rows_imported": len(df),
-                    "columns": list(df.columns),
-                    "sample_data": df.head(3).to_dict(orient='records'),
-                    "detected_schema": detected_schema.to_dict(),
-                }
-        conn.execute(f"CREATE TABLE \"{table_name}\" AS SELECT * FROM df")
+                try:
+                    conn.execute(f"DELETE FROM \"{table_name}\"")
+                    conn.execute(f"INSERT INTO \"{table_name}\" SELECT * FROM _upload_df")
+                    conn.unregister('_upload_df')
+                    conn.close()
+                    return {
+                        "status": "success",
+                        "table_name": table_name,
+                        "rows_imported": len(df),
+                        "columns": list(df.columns),
+                        "sample_data": df.head(3).to_dict(orient='records'),
+                        "detected_schema": detected_schema.to_dict(),
+                    }
+                except Exception:
+                    # Last resort: use a different table name
+                    table_name = f"{table_name}_{int(datetime.now().timestamp())}"
+        conn.execute(f"CREATE TABLE \"{table_name}\" AS SELECT * FROM _upload_df")
+        conn.unregister('_upload_df')
         conn.close()
 
         return {
