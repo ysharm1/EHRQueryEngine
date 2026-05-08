@@ -562,14 +562,14 @@ async def upload_data(
         detector = SmartSchemaDetector()
         detected_schema = detector.detect_schema(df)
         
-        # Connect to DuckDB
-        conn = get_duckdb_connection()
-        
         # Sanitize DataFrame for DuckDB compatibility:
-        # Convert object columns to string to avoid type inference issues
+        # - Convert object columns to handle NaN properly
         for col in df.columns:
             if df[col].dtype == 'object':
-                df[col] = df[col].astype(str).replace('nan', None)
+                df[col] = df[col].where(df[col].notna(), None).astype(object)
+        
+        # Connect to DuckDB
+        conn = get_duckdb_connection()
         
         # Check if table exists
         existing_tables = conn.execute("SHOW TABLES").fetchall()
@@ -814,14 +814,16 @@ async def demo_upload(
         if not table_name or table_name[0].isdigit():
             table_name = f"upload_{table_name}"
 
-        # Detect schema
+        # Detect schema using smart detector
         detector = SmartSchemaDetector()
         detected_schema = detector.detect_schema(df)
 
-        # Sanitize DataFrame for DuckDB compatibility
+        # Sanitize DataFrame for DuckDB compatibility:
+        # - Convert object columns to string
+        # - Handle NaN in float columns that should be integers
         for col in df.columns:
             if df[col].dtype == 'object':
-                df[col] = df[col].astype(str).replace('nan', None)
+                df[col] = df[col].where(df[col].notna(), None).astype(object)
 
         # Load into DuckDB
         conn = get_duckdb_connection()
