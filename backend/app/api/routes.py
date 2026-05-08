@@ -808,11 +808,18 @@ async def demo_upload(
         if df.empty:
             raise HTTPException(status_code=400, detail="File is empty")
 
-        # Generate safe table name
+        # Generate safe table name — prefix with 'upload_' to avoid conflicts with system tables
         table_name = Path(file.filename).stem.lower()
         table_name = ''.join(c if c.isalnum() or c == '_' else '_' for c in table_name)
         if not table_name or table_name[0].isdigit():
             table_name = f"upload_{table_name}"
+        
+        # Avoid collision with system tables
+        system_tables = {"patients", "vital_signs", "lab_results", "diagnoses", 
+                        "procedures_extracted", "medications", "clinical_notes",
+                        "imaging_reports", "extraction_jobs", "encounters", "data_provenance"}
+        if table_name in system_tables:
+            table_name = f"uploaded_{table_name}"
 
         # Detect schema using smart detector
         detector = SmartSchemaDetector()
@@ -829,7 +836,22 @@ async def demo_upload(
         conn = get_duckdb_connection()
         existing = [t[0] for t in conn.execute("SHOW TABLES").fetchall()]
         if table_name in existing:
-            conn.execute(f"DROP TABLE \"{table_name}\"")
+            # Use CASCADE to handle foreign key dependencies
+            try:
+                conn.execute(f"DROP TABLE \"{table_name}\" CASCADE")
+            except Exception:
+                # If CASCADE not supported, delete all rows and re-insert
+                conn.execute(f"DELETE FROM \"{table_name}\"")
+                conn.execute(f"INSERT INTO \"{table_name}\" SELECT * FROM df")
+                conn.close()
+                return {
+                    "status": "success",
+                    "table_name": table_name,
+                    "rows_imported": len(df),
+                    "columns": list(df.columns),
+                    "sample_data": df.head(3).to_dict(orient='records'),
+                    "detected_schema": detected_schema.to_dict(),
+                }
         conn.execute(f"CREATE TABLE \"{table_name}\" AS SELECT * FROM df")
         conn.close()
 
