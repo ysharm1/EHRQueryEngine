@@ -775,7 +775,7 @@ async def health_check():
     return HealthResponse(
         status="healthy",
         timestamp=datetime.now().isoformat(),
-        version="1.0.0"
+        version="1.1.0-upload-fix"
     )
 
 
