@@ -308,7 +308,8 @@ class DatasetAssemblyEngine:
             return self._extract_from_imaging(subject, variable)
         
         else:
-            return None
+            # Try DuckDB custom table lookup
+            return self._extract_from_duckdb_table(subject, variable)
     
     def _extract_from_subject(
         self,
@@ -445,6 +446,67 @@ class DatasetAssemblyEngine:
             return min(values)
         else:
             return values[0]
+    
+    def _extract_from_duckdb_table(
+        self,
+        subject: Subject,
+        variable: VariableRequest
+    ) -> Any:
+        """Extract value from a custom DuckDB table (uploaded data)."""
+        try:
+            from app.database import get_duckdb_connection
+            conn = get_duckdb_connection()
+            
+            table_name = variable.source
+            field = variable.field
+            subject_id = subject.subject_id
+            
+            # Try to find a subject/patient ID column in the table
+            cols = conn.execute(
+                f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}'"
+            ).fetchall()
+            col_names = [c[0] for c in cols]
+            
+            # Look for a linking column
+            id_col = None
+            for candidate in ["subject_id", "patient_id", "id", "subject", "patient"]:
+                if candidate in col_names:
+                    id_col = candidate
+                    break
+            
+            if not id_col or field not in col_names:
+                conn.close()
+                return None
+            
+            # Query the table
+            rows = conn.execute(
+                f"SELECT \"{field}\" FROM \"{table_name}\" WHERE \"{id_col}\" = ?",
+                [subject_id]
+            ).fetchall()
+            conn.close()
+            
+            if not rows:
+                return None
+            
+            values = [r[0] for r in rows if r[0] is not None]
+            if not values:
+                return None
+            
+            # Apply aggregation
+            if variable.aggregation == "count":
+                return len(values)
+            elif variable.aggregation == "history":
+                return ", ".join(str(v) for v in values[:20])  # Limit to 20
+            elif variable.aggregation == "mean":
+                try:
+                    return sum(float(v) for v in values) / len(values)
+                except (ValueError, TypeError):
+                    return None
+            else:
+                return values[0]
+                
+        except Exception:
+            return None
     
     def _calculate_mean(self, variable: VariableRequest) -> Optional[float]:
         """

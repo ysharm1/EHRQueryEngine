@@ -113,6 +113,24 @@ class NLParserService:
         else:
             raise ValueError(f"Unsupported LLM provider: {self.llm_provider}")
     
+    def _get_available_tables(self) -> Dict[str, List[str]]:
+        """Get available tables and their columns from DuckDB."""
+        try:
+            from app.database import get_duckdb_connection
+            conn = get_duckdb_connection()
+            tables = conn.execute("SHOW TABLES").fetchall()
+            result = {}
+            for (table_name,) in tables:
+                try:
+                    cols = conn.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}'").fetchall()
+                    result[table_name] = [c[0] for c in cols]
+                except Exception:
+                    result[table_name] = []
+            conn.close()
+            return result
+        except Exception:
+            return {}
+    
     def parse(self, query_text: str, context: Optional[Dict[str, Any]] = None) -> ParsedIntent:
         """
         Parse natural language query into structured intent.
@@ -146,25 +164,56 @@ class NLParserService:
         """Demo parser for when no API key is available."""
         query_lower = query_text.lower()
         
-        # Default response
+        # Default variables — always include basic demographics
         cohort_criteria = []
         variables = [
             VariableRequest(name="subject_id", source="subjects", field="subject_id"),
-            VariableRequest(name="age", source="subjects", field="date_of_birth"),
             VariableRequest(name="sex", source="subjects", field="sex"),
+            VariableRequest(name="date_of_birth", source="subjects", field="date_of_birth"),
         ]
         
-        # Pattern matching for common queries
-        if "parkinson" in query_lower or "g20" in query_lower:
-            cohort_criteria.append(
-                CohortFilter(
-                    filter_type=FilterType.DIAGNOSIS,
-                    field="diagnosis_codes",
-                    operator=ComparisonOp.CONTAINS,
-                    value="G20"
+        # --- Diagnosis matching ---
+        diagnosis_patterns = {
+            "parkinson": "parkinson",
+            "g20": "parkinson",
+            "diabetes": "diabetes",
+            "e11": "diabetes",
+            "hypertension": "hypertension",
+            "heart failure": "heart failure",
+            "cardiac": "cardiac",
+            "pneumonia": "pneumonia",
+            "sepsis": "sepsis",
+            "renal": "renal",
+            "kidney": "kidney",
+            "anemia": "anemia",
+            "atrial fibrillation": "atrial fibrillation",
+            "copd": "obstructive pulmonary",
+            "stroke": "cerebrovascular",
+            "cancer": "neoplasm",
+            "tumor": "neoplasm",
+        }
+        
+        matched_diagnosis = None
+        for pattern, search_value in diagnosis_patterns.items():
+            if pattern in query_lower:
+                matched_diagnosis = search_value
+                cohort_criteria.append(
+                    CohortFilter(
+                        filter_type=FilterType.DIAGNOSIS,
+                        field="diagnosis_codes",
+                        operator=ComparisonOp.CONTAINS,
+                        value=search_value
+                    )
                 )
+                break
+        
+        # If a diagnosis was matched, include diagnosis list in output
+        if matched_diagnosis:
+            variables.append(
+                VariableRequest(name="diagnoses", source="subjects", field="diagnosis_codes")
             )
         
+        # --- Procedure matching ---
         if "dbs" in query_lower or "deep brain" in query_lower:
             cohort_criteria.append(
                 CohortFilter(
@@ -175,28 +224,55 @@ class NLParserService:
                 )
             )
             variables.append(
-                VariableRequest(name="procedure_date", source="procedures", field="procedure_date")
+                VariableRequest(name="procedures", source="procedures", field="procedure_name", aggregation="history")
+            )
+            variables.append(
+                VariableRequest(name="procedure_date", source="procedures", field="procedure_date", aggregation="history")
             )
         
-        if "diabetes" in query_lower or "e11" in query_lower:
-            cohort_criteria.append(
-                CohortFilter(
-                    filter_type=FilterType.DIAGNOSIS,
-                    field="diagnosis_codes",
-                    operator=ComparisonOp.CONTAINS,
-                    value="E11"
+        if "surgery" in query_lower or "procedure" in query_lower or "surgical" in query_lower:
+            if not any(c.filter_type == FilterType.PROCEDURE for c in cohort_criteria):
+                cohort_criteria.append(
+                    CohortFilter(
+                        filter_type=FilterType.PROCEDURE,
+                        field="procedure_type",
+                        operator=ComparisonOp.EQUALS,
+                        value=""
+                    )
                 )
+            variables.append(
+                VariableRequest(name="procedures", source="procedures", field="procedure_name", aggregation="history")
+            )
+            variables.append(
+                VariableRequest(name="procedure_count", source="procedures", field="procedure_name", aggregation="count")
             )
         
-        if "mri" in query_lower or "imaging" in query_lower:
+        # --- Lab / observation matching ---
+        if "lab" in query_lower or "labs" in query_lower or "test" in query_lower:
             variables.append(
-                VariableRequest(name="mri_features", source="imaging", field="feature_value")
+                VariableRequest(name="lab_count", source="observations", field="observation_value", aggregation="count")
             )
         
-        if "medication" in query_lower or "drug" in query_lower:
+        # --- Medication matching ---
+        if "medication" in query_lower or "drug" in query_lower or "prescription" in query_lower:
             variables.append(
-                VariableRequest(name="medications", source="observations", field="value", aggregation="history")
+                VariableRequest(name="medication_count", source="observations", field="observation_value", aggregation="count")
             )
+        
+        # --- Imaging matching ---
+        if "mri" in query_lower or "imaging" in query_lower or "ct" in query_lower:
+            variables.append(
+                VariableRequest(name="imaging_modality", source="imaging", field="feature_value")
+            )
+        
+        # --- If user asks for "all data" or "everything" ---
+        if "all data" in query_lower or "everything" in query_lower or "all information" in query_lower:
+            variables.extend([
+                VariableRequest(name="diagnoses", source="subjects", field="diagnosis_codes"),
+                VariableRequest(name="procedures", source="procedures", field="procedure_name", aggregation="history"),
+                VariableRequest(name="procedure_count", source="procedures", field="procedure_name", aggregation="count"),
+                VariableRequest(name="lab_count", source="observations", field="observation_value", aggregation="count"),
+            ])
         
         # If no criteria found, return all subjects
         if not cohort_criteria:
@@ -217,22 +293,33 @@ class NLParserService:
         )
     
     def _create_prompt(self, query_text: str, context: Optional[Dict[str, Any]]) -> str:
-        """Create prompt for LLM."""
+        """Create prompt for LLM, including available database schema."""
+        # Dynamically discover available tables in DuckDB
+        available_tables = self._get_available_tables()
+        
+        tables_description = ""
+        if available_tables:
+            tables_description = "\n\nAvailable tables in the database:\n"
+            for table_name, columns in available_tables.items():
+                tables_description += f"  - {table_name}: {', '.join(columns)}\n"
+        
         prompt = f"""You are a biomedical research query parser. Parse the following natural language query into structured components.
 
 Query: "{query_text}"
-
+{tables_description}
 Extract the following information:
 1. Cohort criteria: What filters define the patient/subject population?
    - Filter types: Diagnosis, Procedure, Medication, Demographics, Observation
    - For each filter, identify: field, operator (Equals, Contains, GreaterThan, LessThan, Between), and value
 
 2. Variables: What data should be included in the dataset?
-   - For each variable, identify: name, source (subjects/procedures/observations/imaging), field, aggregation (if any)
+   - For each variable, identify: name, source (subjects/procedures/observations/imaging OR any table name from the available tables above), field, aggregation (if any)
 
 3. Time range: Any temporal constraints? (start date, end date, or relative like "6 months")
 
 4. Confidence: Your confidence in this parsing (0.0 to 1.0)
+
+IMPORTANT: If the query references data that matches a specific uploaded table (not the standard subjects/procedures/observations/imaging), use that table name as the "source" value.
 
 Respond ONLY with valid JSON in this exact format:
 {{
@@ -247,7 +334,7 @@ Respond ONLY with valid JSON in this exact format:
   "variables": [
     {{
       "name": "variable_name",
-      "source": "subjects|procedures|observations|imaging",
+      "source": "subjects|procedures|observations|imaging|<table_name>",
       "field": "field_name",
       "aggregation": "mean|count|history|null"
     }}

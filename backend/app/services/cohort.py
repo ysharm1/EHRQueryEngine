@@ -125,14 +125,53 @@ class CohortIdentifier:
         Evaluate diagnosis filter.
         
         Implements Requirement 4.3
+        Supports exact code match, partial text match, and ICD code-to-text expansion.
         """
-        value = criterion.get("value", "")
+        value = criterion.get("value", "").lower().strip()
         
         # Check if diagnosis code exists in subject's diagnosis codes
         if not subject.diagnosis_codes:
             return False
         
-        return value in subject.diagnosis_codes
+        # Map common ICD-10 codes to text search terms (LLMs often send codes)
+        icd_to_text = {
+            "e11": "diabetes",
+            "e10": "diabetes",
+            "i10": "hypertension",
+            "i50": "heart failure",
+            "j44": "obstructive pulmonary",
+            "g20": "parkinson",
+            "j18": "pneumonia",
+            "a41": "sepsis",
+            "n18": "kidney disease",
+            "i48": "atrial fibrillation",
+            "i63": "cerebral infarction",
+            "d64": "anemia",
+            "j96": "respiratory failure",
+            "i25": "coronary",
+            "f32": "depressive",
+        }
+        
+        # Expand ICD code to text if applicable
+        search_terms = [value]
+        if value in icd_to_text:
+            search_terms.append(icd_to_text[value])
+        
+        # Check each stored diagnosis (could be codes or descriptions)
+        for diag in subject.diagnosis_codes:
+            diag_lower = str(diag).lower()
+            for term in search_terms:
+                # Exact match
+                if term == diag_lower:
+                    return True
+                # Partial/substring match
+                if term in diag_lower:
+                    return True
+                # Code prefix match
+                if diag_lower.startswith(term):
+                    return True
+        
+        return False
     
     def _evaluate_procedure_filter(self, subject: Subject, criterion: Dict[str, Any]) -> bool:
         """Evaluate procedure filter. Matches on code OR partial name."""
@@ -174,11 +213,24 @@ class CohortIdentifier:
         operator = criterion.get("operator", "Equals")
         value = criterion.get("value", "")
         
+        # Normalize field aliases (LLMs may use "gender" instead of "sex")
+        field_aliases = {"gender": "sex", "age": "date_of_birth"}
+        field = field_aliases.get(field.lower(), field)
+        
         # Get subject's field value
         subject_value = getattr(subject, field, None)
         
         if subject_value is None:
             return False
+        
+        # Normalize sex/gender comparisons
+        if field == "sex":
+            # Map common LLM outputs to enum values
+            value_lower = str(value).lower()
+            sex_map = {"female": "F", "male": "M", "f": "F", "m": "M", "other": "O"}
+            normalized_value = sex_map.get(value_lower, value)
+            subject_sex = subject_value.value if hasattr(subject_value, 'value') else str(subject_value)
+            return subject_sex == normalized_value
         
         # Apply comparison operator
         return self._apply_comparison(subject_value, operator, value, field)

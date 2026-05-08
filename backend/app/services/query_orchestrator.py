@@ -193,6 +193,19 @@ class QueryOrchestrator:
             # Step 8: Convert variables to VariableRequest objects
             variable_requests = self._convert_variables(variables)
             
+            # If LLM returned no variables, add sensible defaults based on cohort criteria
+            if not variable_requests:
+                variable_requests = [
+                    VariableRequest(name="sex", source="subjects", field="sex"),
+                    VariableRequest(name="date_of_birth", source="subjects", field="date_of_birth"),
+                    VariableRequest(name="diagnoses", source="subjects", field="diagnosis_codes"),
+                ]
+                # Add procedure info if procedures were in the criteria
+                if any(c.get("filter_type") == "Procedure" for c in cohort_criteria):
+                    variable_requests.append(
+                        VariableRequest(name="procedures", source="procedures", field="procedure_name", aggregation="history")
+                    )
+            
             # Step 9: Assemble dataset (Req 7.1)
             logger.info(f"Assembling dataset for {len(cohort)} subjects")
             dataset = self.dataset_assembly.assemble(
