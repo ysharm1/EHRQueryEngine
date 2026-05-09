@@ -563,38 +563,36 @@ async def upload_data(
         detected_schema = detector.detect_schema(df)
         
         # Sanitize DataFrame for DuckDB compatibility
-        for col in df.columns:
-            if df[col].dtype == 'object':
-                df[col] = df[col].fillna('').astype(str)
-        
-        # Connect to DuckDB
-        conn = get_duckdb_connection()
-        conn.register('_upload_df', df)
-        
-        # Check if table exists
-        existing_tables = conn.execute("SHOW TABLES").fetchall()
-        table_exists = any(table_name == t[0] for t in existing_tables)
-        
-        if table_exists:
-            # Append to existing table
-            try:
-                conn.execute(f"INSERT INTO \"{table_name}\" SELECT * FROM _upload_df")
-            except Exception:
-                # Schema mismatch — drop and recreate
+        # Write to temp CSV to avoid pandas dtype issues with DuckDB
+        import tempfile, os
+
+        tmp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        df.to_csv(tmp_file.name, index=False)
+        tmp_path = tmp_file.name
+
+        try:
+            # Connect to DuckDB
+            conn = get_duckdb_connection()
+
+            # Check if table exists
+            existing_tables = conn.execute("SHOW TABLES").fetchall()
+            table_exists = any(table_name == t[0] for t in existing_tables)
+
+            if table_exists:
+                # Drop and recreate to avoid schema mismatch issues
                 try:
                     conn.execute(f"DROP TABLE IF EXISTS \"{table_name}\" CASCADE")
-                    conn.execute(f"CREATE TABLE \"{table_name}\" AS SELECT * FROM _upload_df")
                 except Exception:
                     table_name = f"{table_name}_{int(datetime.now().timestamp())}"
-                    conn.execute(f"CREATE TABLE \"{table_name}\" AS SELECT * FROM _upload_df")
-            action = "appended"
-        else:
-            # Create new table
-            conn.execute(f"CREATE TABLE \"{table_name}\" AS SELECT * FROM _upload_df")
-            action = "created"
-        
-        conn.unregister('_upload_df')
-        conn.close()
+                conn.execute(f"CREATE TABLE \"{table_name}\" AS SELECT * FROM read_csv_auto('{tmp_path}')")
+                action = "replaced"
+            else:
+                conn.execute(f"CREATE TABLE \"{table_name}\" AS SELECT * FROM read_csv_auto('{tmp_path}')")
+                action = "created"
+
+            conn.close()
+        finally:
+            os.unlink(tmp_path)
         
         # Log upload
         audit_service.log_data_upload(
@@ -836,63 +834,29 @@ async def demo_upload(
         detected_schema = detector.detect_schema(df)
 
         # Sanitize DataFrame for DuckDB compatibility:
-        # DuckDB can fail with "Data type 'str' not recognized" on object columns.
-        # Fix: build explicit CREATE TABLE DDL with proper DuckDB types.
-        def _pandas_dtype_to_duckdb(dtype, col_name, series):
-            """Map pandas dtype to DuckDB SQL type."""
-            dtype_str = str(dtype)
-            if 'int' in dtype_str:
-                return 'BIGINT'
-            elif 'float' in dtype_str:
-                return 'DOUBLE'
-            elif 'bool' in dtype_str:
-                return 'BOOLEAN'
-            elif 'datetime' in dtype_str:
-                return 'TIMESTAMP'
-            else:
-                return 'VARCHAR'
+        # DuckDB fails with "Data type 'str' not recognized" when registering
+        # pandas DataFrames with object dtype. Fix: write to temp CSV and use
+        # DuckDB's read_csv_auto which handles type inference correctly.
+        import tempfile, os
 
-        # Convert object columns to string to avoid type inference issues
-        for col in df.columns:
-            if df[col].dtype == 'object':
-                df[col] = df[col].fillna('').astype(str)
+        # Write DataFrame to a temp CSV file
+        tmp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+        df.to_csv(tmp_file.name, index=False)
+        tmp_path = tmp_file.name
 
-        # Build explicit DDL to avoid DuckDB type inference problems
-        col_defs = []
-        for col in df.columns:
-            duckdb_type = _pandas_dtype_to_duckdb(df[col].dtype, col, df[col])
-            safe_col = f'"{col}"'
-            col_defs.append(f"{safe_col} {duckdb_type}")
-
-        # Load into DuckDB
-        conn = get_duckdb_connection()
-        conn.register('_upload_df', df)
-        existing = [t[0] for t in conn.execute("SHOW TABLES").fetchall()]
-        if table_name in existing:
-            # Try multiple strategies to handle existing tables
-            try:
-                conn.execute(f"DROP TABLE IF EXISTS \"{table_name}\" CASCADE")
-            except Exception:
+        try:
+            # Load into DuckDB using read_csv_auto (avoids pandas dtype issues)
+            conn = get_duckdb_connection()
+            existing = [t[0] for t in conn.execute("SHOW TABLES").fetchall()]
+            if table_name in existing:
                 try:
-                    conn.execute(f"DELETE FROM \"{table_name}\"")
-                    conn.execute(f"INSERT INTO \"{table_name}\" SELECT * FROM _upload_df")
-                    conn.unregister('_upload_df')
-                    conn.close()
-                    return {
-                        "status": "success",
-                        "table_name": table_name,
-                        "rows_imported": len(df),
-                        "columns": list(df.columns),
-                        "sample_data": df.head(3).to_dict(orient='records'),
-                        "detected_schema": detected_schema.to_dict(),
-                    }
+                    conn.execute(f"DROP TABLE IF EXISTS \"{table_name}\" CASCADE")
                 except Exception:
-                    # Last resort: use a different table name
                     table_name = f"{table_name}_{int(datetime.now().timestamp())}"
-        conn.execute(f"CREATE TABLE \"{table_name}\" ({', '.join(col_defs)})")
-        conn.execute(f"INSERT INTO \"{table_name}\" SELECT * FROM _upload_df")
-        conn.unregister('_upload_df')
-        conn.close()
+            conn.execute(f"CREATE TABLE \"{table_name}\" AS SELECT * FROM read_csv_auto('{tmp_path}')")
+            conn.close()
+        finally:
+            os.unlink(tmp_path)
 
         return {
             "status": "success",
