@@ -795,77 +795,124 @@ async def demo_upload(
     """
     Public upload endpoint — no authentication required.
     Accepts CSV/Excel/JSON files and loads them into DuckDB for querying.
+    Streams file to disk to handle large files without loading into memory.
     """
     from app.database import get_duckdb_connection
     from app.services.smart_schema_detector import SmartSchemaDetector
+    import tempfile, os, shutil
 
+    tmp_path = None
     try:
         file_ext = Path(file.filename).suffix.lower()
 
-        if file_ext == '.csv':
-            df = pd.read_csv(file.file)
-        elif file_ext in ['.xlsx', '.xls']:
-            df = pd.read_excel(file.file)
-        elif file_ext == '.json':
-            df = pd.read_json(file.file)
-        else:
+        if file_ext not in ('.csv', '.xlsx', '.xls', '.json'):
             raise HTTPException(
                 status_code=400,
                 detail=f"Unsupported file type: {file_ext}. Use .csv, .xlsx, .xls, or .json"
             )
 
-        if df.empty:
+        # Stream upload directly to a temp file (avoids loading into memory)
+        tmp_file = tempfile.NamedTemporaryFile(mode='wb', suffix=file_ext, delete=False)
+        tmp_path = tmp_file.name
+        with tmp_file:
+            shutil.copyfileobj(file.file, tmp_file)
+
+        file_size = os.path.getsize(tmp_path)
+        if file_size == 0:
             raise HTTPException(status_code=400, detail="File is empty")
 
-        # Generate safe table name — prefix with 'upload_' to avoid conflicts with system tables
+        # Generate safe table name
         table_name = Path(file.filename).stem.lower()
         table_name = ''.join(c if c.isalnum() or c == '_' else '_' for c in table_name)
         if not table_name or table_name[0].isdigit():
             table_name = f"upload_{table_name}"
-        
-        # Avoid collision with system tables
-        system_tables = {"patients", "vital_signs", "lab_results", "diagnoses", 
+
+        system_tables = {"patients", "vital_signs", "lab_results", "diagnoses",
                         "procedures_extracted", "medications", "clinical_notes",
                         "imaging_reports", "extraction_jobs", "encounters", "data_provenance"}
         if table_name in system_tables:
             table_name = f"uploaded_{table_name}"
 
-        # Detect schema using smart detector
-        detector = SmartSchemaDetector()
-        detected_schema = detector.detect_schema(df)
+        conn = get_duckdb_connection()
 
-        # Sanitize DataFrame for DuckDB compatibility:
-        # DuckDB fails with "Data type 'str' not recognized" when registering
-        # pandas DataFrames with object dtype. Fix: write to temp CSV and use
-        # DuckDB's read_csv_auto which handles type inference correctly.
-        import tempfile, os
-
-        # Write DataFrame to a temp CSV file
-        tmp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
-        df.to_csv(tmp_file.name, index=False)
-        tmp_path = tmp_file.name
-
-        try:
-            # Load into DuckDB using read_csv_auto (avoids pandas dtype issues)
-            conn = get_duckdb_connection()
+        # For CSV, use DuckDB's native loader — handles huge files efficiently
+        if file_ext == '.csv':
             existing = [t[0] for t in conn.execute("SHOW TABLES").fetchall()]
             if table_name in existing:
                 try:
                     conn.execute(f"DROP TABLE IF EXISTS \"{table_name}\" CASCADE")
                 except Exception:
                     table_name = f"{table_name}_{int(datetime.now().timestamp())}"
-            conn.execute(f"CREATE TABLE \"{table_name}\" AS SELECT * FROM read_csv_auto('{tmp_path}')")
-            conn.close()
-        finally:
-            os.unlink(tmp_path)
+
+            # Try read_csv_auto first, fall back to all_varchar on type errors
+            try:
+                conn.execute(
+                    f"CREATE TABLE \"{table_name}\" AS "
+                    f"SELECT * FROM read_csv_auto(?, sample_size=10000)",
+                    [tmp_path]
+                )
+            except Exception:
+                # Fallback: force all columns to VARCHAR to bypass type inference
+                conn.execute(
+                    f"CREATE TABLE \"{table_name}\" AS "
+                    f"SELECT * FROM read_csv(?, all_varchar=true, header=true)",
+                    [tmp_path]
+                )
+        else:
+            # For Excel/JSON, we still need pandas
+            if file_ext in ('.xlsx', '.xls'):
+                df = pd.read_excel(tmp_path)
+            else:  # .json
+                df = pd.read_json(tmp_path)
+
+            if df.empty:
+                raise HTTPException(status_code=400, detail="File is empty")
+
+            # Write to CSV then use DuckDB's native loader
+            csv_tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+            csv_tmp.close()
+            df.to_csv(csv_tmp.name, index=False)
+            try:
+                existing = [t[0] for t in conn.execute("SHOW TABLES").fetchall()]
+                if table_name in existing:
+                    try:
+                        conn.execute(f"DROP TABLE IF EXISTS \"{table_name}\" CASCADE")
+                    except Exception:
+                        table_name = f"{table_name}_{int(datetime.now().timestamp())}"
+                conn.execute(
+                    f"CREATE TABLE \"{table_name}\" AS "
+                    f"SELECT * FROM read_csv(?, all_varchar=true, header=true)",
+                    [csv_tmp.name]
+                )
+            finally:
+                os.unlink(csv_tmp.name)
+
+        # Get row count and columns from DuckDB
+        row_count = conn.execute(f"SELECT COUNT(*) FROM \"{table_name}\"").fetchone()[0]
+        col_info = conn.execute(f"DESCRIBE \"{table_name}\"").fetchall()
+        columns = [c[0] for c in col_info]
+        sample_rows = conn.execute(f"SELECT * FROM \"{table_name}\" LIMIT 3").fetchall()
+        sample_data = [dict(zip(columns, row)) for row in sample_rows]
+
+        # Build a lightweight schema summary (no pandas needed)
+        detected_schema = {
+            "row_count": row_count,
+            "inferred_subject_id_column": next(
+                (c for c in columns if c.lower() in ('subject_id', 'patient_id', 'id', 'mrn')),
+                None
+            ),
+            "columns": [{"name": c[0], "data_type": c[1]} for c in col_info],
+        }
+
+        conn.close()
 
         return {
             "status": "success",
             "table_name": table_name,
-            "rows_imported": len(df),
-            "columns": list(df.columns),
-            "sample_data": df.head(3).to_dict(orient='records'),
-            "detected_schema": detected_schema.to_dict(),
+            "rows_imported": row_count,
+            "columns": columns,
+            "sample_data": sample_data,
+            "detected_schema": detected_schema,
         }
 
     except HTTPException:
@@ -876,6 +923,9 @@ async def demo_upload(
         logger = logging.getLogger(__name__)
         logger.error(f"Upload failed: {tb}")
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)} | Traceback: {tb[-500:]}")
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 # ── Public Demo Endpoint (no auth required) ──────────────────────────────────
