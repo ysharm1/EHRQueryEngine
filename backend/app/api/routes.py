@@ -957,14 +957,9 @@ async def demo_query(
 
     response = orchestrator.process_query(query_request)
 
-    # Fallback: if the standard pipeline found nothing, try DuckDB-native
-    # search against uploaded tables. This handles the case where users
-    # upload CSVs (which go to DuckDB) and query them.
-    no_subjects = (
-        response.row_count == 0
-        and response.status.value in ("Failed",)
-        and (response.error_message or "").lower().find("no subjects") >= 0
-    ) or (response.row_count == 0 and not response.error_message)
+    # Fallback: if the standard pipeline found nothing, try LLM-powered DuckDB
+    # search against uploaded tables. Trigger on any failed/empty result.
+    no_subjects = response.row_count == 0 and response.status.value in ("Failed", "Completed")
 
     if no_subjects:
         try:
