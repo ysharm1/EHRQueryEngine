@@ -1,5 +1,6 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from app.config import settings
 from app.api.routes import router
 from app.api.extraction_routes import router as extraction_router
@@ -39,6 +40,33 @@ app.add_middleware(
 app.include_router(router, prefix="/api")
 app.include_router(extraction_router, prefix="/api")
 app.include_router(clinical_router, prefix="/api")
+
+
+# Global exception handler to ensure CORS headers are set on all errors
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    import traceback
+    import logging
+    logger = logging.getLogger(__name__)
+    tb = traceback.format_exc()
+    logger.error(f"Unhandled exception on {request.url.path}: {tb}")
+
+    origin = request.headers.get("origin", "*")
+    allowed = settings.cors_origins_list
+    cors_origin = origin if (allowed == ["*"] or origin in allowed) else "null"
+
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": f"Server error: {str(exc)}",
+            "traceback": tb[-1000:],
+        },
+        headers={
+            "Access-Control-Allow-Origin": cors_origin,
+            "Access-Control-Allow-Methods": "*",
+            "Access-Control-Allow-Headers": "*",
+        },
+    )
 
 
 @app.get("/")
