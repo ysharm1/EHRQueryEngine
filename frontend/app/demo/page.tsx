@@ -69,8 +69,9 @@ export default function DemoPage() {
   // Upload state
   const [showUpload, setShowUpload] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
+  const [uploadResults, setUploadResults] = useState<UploadResult[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number; name: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const runQuery = async (queryText: string) => {
@@ -152,24 +153,44 @@ export default function DemoPage() {
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
     setUploading(true);
     setUploadError(null);
-    setUploadResult(null);
-    const formData = new FormData();
-    formData.append('file', file);
-    try {
-      const res = await axios.post(`${API_URL}/api/demo/upload`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      setUploadResult(res.data);
-    } catch (err: any) {
-      setUploadError(err?.response?.data?.detail || 'Upload failed. Check file format and try again.');
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+
+    const newResults: UploadResult[] = [];
+    const failures: string[] = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      setUploadProgress({ current: i + 1, total: files.length, name: file.name });
+      const formData = new FormData();
+      formData.append('file', file);
+      try {
+        const res = await axios.post(`${API_URL}/api/demo/upload`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        newResults.push(res.data);
+      } catch (err: any) {
+        failures.push(`${file.name}: ${err?.response?.data?.detail || 'upload failed'}`);
+      }
     }
+
+    // Append new uploads to existing ones (don't replace)
+    if (newResults.length > 0) {
+      setUploadResults(prev => {
+        // Dedupe by table_name — newest wins
+        const byName = new Map(prev.map(r => [r.table_name, r]));
+        newResults.forEach(r => byName.set(r.table_name, r));
+        return Array.from(byName.values());
+      });
+    }
+    if (failures.length > 0) {
+      setUploadError(failures.join(' · '));
+    }
+    setUploading(false);
+    setUploadProgress(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const downloadFile = (url: string) => {
@@ -193,14 +214,14 @@ export default function DemoPage() {
           </div>
           <div className="flex items-center gap-3">
             <button
-              onClick={() => { setShowUpload(v => !v); setUploadResult(null); setUploadError(null); }}
+              onClick={() => { setShowUpload(v => !v); setUploadError(null); }}
               className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${
                 showUpload
                   ? 'border-blue-500/50 bg-blue-500/15 text-blue-400'
                   : 'border-white/10 bg-white/5 text-white/50 hover:text-white/80'
               }`}
             >
-              {showUpload ? '✕ Close' : '↑ Upload Data'}
+              {showUpload ? '✕ Close' : `↑ Upload Data${uploadResults.length > 0 ? ` (${uploadResults.length})` : ''}`}
             </button>
             <span className="flex items-center gap-1.5 text-xs text-emerald-400">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
@@ -221,24 +242,26 @@ export default function DemoPage() {
           <div className="rounded-2xl border border-blue-500/20 bg-blue-500/5 p-6 space-y-4">
             <div>
               <h2 className="font-semibold text-sm text-white">Upload Your Dataset</h2>
-              <p className="text-xs text-white/40 mt-0.5">CSV, Excel (.xlsx), or JSON — schema is auto-detected, no formatting needed</p>
+              <p className="text-xs text-white/40 mt-0.5">CSV, Excel (.xlsx), or JSON — pick one or multiple files. Schema is auto-detected.</p>
             </div>
             <label className={`flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-8 cursor-pointer transition-colors ${
               uploading ? 'border-blue-500/30 bg-blue-500/5' : 'border-white/10 hover:border-blue-500/40 hover:bg-blue-500/5'
             }`}>
-              <input ref={fileInputRef} type="file" accept=".csv,.xlsx,.xls,.json" onChange={handleFileUpload} className="hidden" disabled={uploading} />
+              <input ref={fileInputRef} type="file" multiple accept=".csv,.xlsx,.xls,.json" onChange={handleFileUpload} className="hidden" disabled={uploading} />
               {uploading ? (
                 <div className="flex items-center gap-2 text-blue-400 text-sm">
                   <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
                   </svg>
-                  Importing...
+                  {uploadProgress
+                    ? `Importing ${uploadProgress.current}/${uploadProgress.total}: ${uploadProgress.name}`
+                    : 'Importing...'}
                 </div>
               ) : (
                 <>
                   <div className="text-3xl">📂</div>
-                  <div className="text-sm text-white/60">Click to select a file</div>
+                  <div className="text-sm text-white/60">Click to select one or more files</div>
                   <div className="text-xs text-white/30">CSV · Excel · JSON</div>
                 </>
               )}
@@ -246,23 +269,47 @@ export default function DemoPage() {
             {uploadError && (
               <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-red-400 text-xs">{uploadError}</div>
             )}
-            {uploadResult && (
-              <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 space-y-2">
-                <div className="flex items-center gap-2 text-emerald-400 text-sm font-medium">
-                  <span>✓</span>
-                  <span>Imported as <code className="font-mono bg-white/10 px-1.5 py-0.5 rounded text-xs">{uploadResult.table_name}</code></span>
+            {uploadResults.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs text-white/60 font-medium">
+                    {uploadResults.length} table{uploadResults.length === 1 ? '' : 's'} loaded
+                  </div>
+                  <button
+                    onClick={() => setUploadResults([])}
+                    className="text-xs text-white/30 hover:text-white/60 transition-colors"
+                  >
+                    Clear list
+                  </button>
                 </div>
-                <div className="flex gap-4 text-xs text-white/50">
-                  <span>👥 {uploadResult.rows_imported.toLocaleString()} rows</span>
-                  <span>📊 {uploadResult.columns.length} columns</span>
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  {uploadResult.columns.slice(0, 8).map(col => (
-                    <span key={col} className="rounded bg-white/5 border border-white/10 px-2 py-0.5 text-xs text-white/50 font-mono">{col}</span>
-                  ))}
-                  {uploadResult.columns.length > 8 && <span className="text-xs text-white/30">+{uploadResult.columns.length - 8} more</span>}
-                </div>
-                <p className="text-xs text-white/40">Data loaded. Type a query below to search it.</p>
+                {uploadResults.map((r) => (
+                  <div key={r.table_name} className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 text-emerald-400 text-sm font-medium min-w-0">
+                        <span>✓</span>
+                        <code className="font-mono bg-white/10 px-1.5 py-0.5 rounded text-xs truncate">{r.table_name}</code>
+                      </div>
+                      <button
+                        onClick={() => setUploadResults(prev => prev.filter(x => x.table_name !== r.table_name))}
+                        className="text-xs text-white/30 hover:text-red-400 transition-colors shrink-0"
+                        title="Remove from list (table stays in DB)"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <div className="flex gap-4 text-xs text-white/50">
+                      <span>👥 {r.rows_imported.toLocaleString()} rows</span>
+                      <span>📊 {r.columns.length} columns</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {r.columns.slice(0, 6).map(col => (
+                        <span key={col} className="rounded bg-white/5 border border-white/10 px-1.5 py-0.5 text-xs text-white/50 font-mono">{col}</span>
+                      ))}
+                      {r.columns.length > 6 && <span className="text-xs text-white/30">+{r.columns.length - 6} more</span>}
+                    </div>
+                  </div>
+                ))}
+                <p className="text-xs text-white/40">All uploaded tables are queryable below.</p>
               </div>
             )}
           </div>
