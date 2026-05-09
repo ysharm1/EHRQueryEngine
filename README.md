@@ -162,6 +162,3 @@ EHRQueryEngine/
 
 ---
 
-## License
-
-MIT
