@@ -4,6 +4,7 @@ from sqlalchemy.orm import sessionmaker
 import duckdb
 from app.config import settings
 import os
+from pathlib import Path
 
 # Use SQLite for demo (switch to PostgreSQL for production)
 # Use /tmp for writable storage on Render free tier
@@ -27,5 +28,19 @@ def get_db():
 
 # DuckDB for analytics warehouse
 def get_duckdb_connection():
-    """Get DuckDB connection for analytics queries."""
-    return duckdb.connect(settings.duckdb_path)
+    """Get DuckDB connection for analytics queries.
+
+    Ensures the parent directory exists before opening the database file.
+    """
+    duckdb_path = settings.duckdb_path
+    parent = Path(duckdb_path).parent
+    if str(parent) and str(parent) != ".":
+        try:
+            parent.mkdir(parents=True, exist_ok=True)
+        except (OSError, PermissionError):
+            # If we can't create the configured path (e.g. read-only disk),
+            # fall back to /tmp so the app still runs.
+            fallback = "/tmp/warehouse.duckdb"
+            os.makedirs("/tmp", exist_ok=True)
+            duckdb_path = fallback
+    return duckdb.connect(duckdb_path)
