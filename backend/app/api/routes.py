@@ -836,16 +836,36 @@ async def demo_upload(
         detected_schema = detector.detect_schema(df)
 
         # Sanitize DataFrame for DuckDB compatibility:
-        # DuckDB 0.9.x can fail with "Data type 'str' not recognized" on object columns.
-        # Fix: convert all object columns to explicit VARCHAR-compatible types.
+        # DuckDB can fail with "Data type 'str' not recognized" on object columns.
+        # Fix: build explicit CREATE TABLE DDL with proper DuckDB types.
+        def _pandas_dtype_to_duckdb(dtype, col_name, series):
+            """Map pandas dtype to DuckDB SQL type."""
+            dtype_str = str(dtype)
+            if 'int' in dtype_str:
+                return 'BIGINT'
+            elif 'float' in dtype_str:
+                return 'DOUBLE'
+            elif 'bool' in dtype_str:
+                return 'BOOLEAN'
+            elif 'datetime' in dtype_str:
+                return 'TIMESTAMP'
+            else:
+                return 'VARCHAR'
+
+        # Convert object columns to string to avoid type inference issues
         for col in df.columns:
             if df[col].dtype == 'object':
-                # Replace NaN/None with empty string, keep as object dtype
                 df[col] = df[col].fillna('').astype(str)
+
+        # Build explicit DDL to avoid DuckDB type inference problems
+        col_defs = []
+        for col in df.columns:
+            duckdb_type = _pandas_dtype_to_duckdb(df[col].dtype, col, df[col])
+            safe_col = f'"{col}"'
+            col_defs.append(f"{safe_col} {duckdb_type}")
 
         # Load into DuckDB
         conn = get_duckdb_connection()
-        # Register the DataFrame explicitly to avoid type inference issues
         conn.register('_upload_df', df)
         existing = [t[0] for t in conn.execute("SHOW TABLES").fetchall()]
         if table_name in existing:
@@ -869,7 +889,8 @@ async def demo_upload(
                 except Exception:
                     # Last resort: use a different table name
                     table_name = f"{table_name}_{int(datetime.now().timestamp())}"
-        conn.execute(f"CREATE TABLE \"{table_name}\" AS SELECT * FROM _upload_df")
+        conn.execute(f"CREATE TABLE \"{table_name}\" ({', '.join(col_defs)})")
+        conn.execute(f"INSERT INTO \"{table_name}\" SELECT * FROM _upload_df")
         conn.unregister('_upload_df')
         conn.close()
 
