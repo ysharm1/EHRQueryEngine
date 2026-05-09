@@ -1027,54 +1027,26 @@ def _run_duckdb_fallback(
 
     conn = get_duckdb_connection()
     try:
-        # Step 1: Have LLM generate SQL from the query
-        gen_result = generate_sql(conn, query_text)
-        if gen_result.get("error") or not gen_result.get("sql"):
-            # If LLM fails, fall back to heuristic search
-            from app.services.duckdb_cohort_search import search_duckdb_cohort
-            parsed = nl_parser.parse(query_text)
-            criteria = parsed.to_dict().get("cohort_criteria", [])
-            if not criteria:
-                conn.close()
-                return None
-            result = search_duckdb_cohort(conn, criteria)
-            conn.close()
-            subjects = result.get("subjects", [])
-            if not subjects:
-                msg = result.get("message", "No matches in uploaded data")
-                return QuerySubmitResponse(
-                    dataset_id="",
-                    status="Failed",
-                    row_count=0,
-                    column_count=0,
-                    download_urls=[],
-                    metadata={"fallback": "heuristic", "message": msg},
-                    error_message=msg,
-                )
-            rows = subjects
-            columns = list(subjects[0].keys())
-            sql_used = result.get("sql", "")
-        else:
-            # Step 2: Execute the generated SQL
-            sql = gen_result["sql"]
-            exec_result = execute_generated_sql(conn, sql)
-            conn.close()
+        # Step 1: LLM generates + executes SQL with auto-retry on failure
+        from app.services.llm_sql_generator import generate_sql_with_retry
+        exec_result = generate_sql_with_retry(conn, query_text)
+        conn.close()
 
-            if exec_result.get("error") or exec_result["row_count"] == 0:
-                msg = exec_result.get("error") or "No matching data found"
-                return QuerySubmitResponse(
-                    dataset_id="",
-                    status="Failed",
-                    row_count=0,
-                    column_count=0,
-                    download_urls=[],
-                    metadata={"fallback": "llm", "sql": sql, "message": msg},
-                    error_message=msg,
-                )
+        if exec_result.get("error") or exec_result["row_count"] == 0:
+            msg = exec_result.get("error") or "No matching data found"
+            return QuerySubmitResponse(
+                dataset_id="",
+                status="Failed",
+                row_count=0,
+                column_count=0,
+                download_urls=[],
+                metadata={"fallback": "llm", "sql": exec_result.get("sql", ""), "message": msg},
+                error_message=msg,
+            )
 
-            rows = exec_result["rows"]
-            columns = exec_result["columns"]
-            sql_used = sql
+        rows = exec_result["rows"]
+        columns = exec_result["columns"]
+        sql_used = exec_result.get("sql", "")
     except Exception as e:
         try:
             conn.close()

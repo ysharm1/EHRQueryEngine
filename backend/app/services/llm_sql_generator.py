@@ -153,12 +153,7 @@ Generate a DuckDB SQL query that answers the user's question. Return ONLY the SQ
 def execute_generated_sql(conn, sql: str) -> Dict[str, Any]:
     """
     Execute LLM-generated SQL and return results.
-
-    Returns dict with:
-      - rows: list of dicts
-      - columns: list of column names
-      - row_count: number of rows
-      - error: error message if execution failed
+    If execution fails, returns the error for retry logic.
     """
     try:
         result = conn.execute(sql)
@@ -189,3 +184,77 @@ def execute_generated_sql(conn, sql: str) -> Dict[str, Any]:
             "row_count": 0,
             "error": f"SQL execution failed: {str(e)}",
         }
+
+
+def generate_sql_with_retry(conn, query_text: str, max_retries: int = 2) -> Dict[str, Any]:
+    """
+    Generate and execute SQL with automatic retry on failure.
+    If the first SQL fails, sends the error back to GPT to self-correct.
+    """
+    if not settings.openai_api_key:
+        return {"rows": [], "columns": [], "row_count": 0, "sql": "", "error": "No OpenAI API key"}
+
+    schemas = _get_table_schemas(conn)
+    if not schemas:
+        return {"rows": [], "columns": [], "row_count": 0, "sql": "", "error": "No tables with data found"}
+
+    schema_desc = "Available tables:\n\n"
+    for tname, info in schemas.items():
+        schema_desc += f"Table: {tname} ({info['row_count']} rows)\n"
+        schema_desc += "Columns:\n"
+        for col in info["columns"]:
+            schema_desc += f"  - {col['name']} ({col['type']})\n"
+        if info.get("sample_data"):
+            schema_desc += f"Sample data: {json.dumps(info['sample_data'][:2], default=str)}\n"
+        schema_desc += "\n"
+
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": f"Query: {query_text}\n\n{schema_desc}\n\nGenerate a DuckDB SQL query. Return ONLY the SQL."},
+    ]
+
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=settings.openai_api_key)
+
+        for attempt in range(max_retries):
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages,
+                temperature=0,
+                max_tokens=1000,
+            )
+
+            sql = response.choices[0].message.content.strip()
+            if sql.startswith("```"):
+                lines = sql.split("\n")
+                sql = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+            sql = sql.strip().rstrip(";")
+
+            import re
+            sql = re.sub(r'\bLIMIT\s+\d+\b', 'LIMIT 50000', sql, flags=re.IGNORECASE)
+            if 'LIMIT' not in sql.upper():
+                sql = sql + ' LIMIT 50000'
+
+            if not sql.upper().strip().startswith("SELECT"):
+                return {"rows": [], "columns": [], "row_count": 0, "sql": sql, "error": "Non-SELECT statement generated"}
+
+            exec_result = execute_generated_sql(conn, sql)
+
+            if exec_result["error"] is None:
+                exec_result["sql"] = sql
+                return exec_result
+
+            # Retry: tell GPT what went wrong
+            messages.append({"role": "assistant", "content": sql})
+            messages.append({
+                "role": "user",
+                "content": f"That SQL failed with this error:\n{exec_result['error']}\n\nPlease fix the SQL. Only use columns that exist in the table schemas above. Return ONLY the corrected SQL."
+            })
+            logger.warning(f"SQL attempt {attempt+1} failed, retrying: {exec_result['error']}")
+
+        return {"rows": [], "columns": [], "row_count": 0, "sql": sql, "error": exec_result.get("error", "Max retries exceeded")}
+
+    except Exception as e:
+        logger.error(f"LLM SQL generation failed: {e}")
+        return {"rows": [], "columns": [], "row_count": 0, "sql": "", "error": str(e)}
