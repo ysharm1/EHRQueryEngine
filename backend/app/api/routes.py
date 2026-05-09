@@ -937,6 +937,8 @@ async def demo_query(
     """
     Public demo endpoint — no authentication required.
     Uses a fixed demo user so anyone can try the NL query engine.
+    Falls back to DuckDB-native search against uploaded tables if the
+    SQLAlchemy-based cohort pipeline returns no results.
     """
     nl_parser = NLParserService()
     orchestrator = QueryOrchestrator(db, nl_parser)
@@ -955,11 +957,33 @@ async def demo_query(
 
     response = orchestrator.process_query(query_request)
 
+    # Fallback: if the standard pipeline found nothing, try DuckDB-native
+    # search against uploaded tables. This handles the case where users
+    # upload CSVs (which go to DuckDB) and query them.
+    no_subjects = (
+        response.row_count == 0
+        and response.status.value in ("Failed",)
+        and (response.error_message or "").lower().find("no subjects") >= 0
+    ) or (response.row_count == 0 and not response.error_message)
+
+    if no_subjects:
+        try:
+            fallback = _run_duckdb_fallback(
+                nl_parser=nl_parser,
+                query_text=request.query_text,
+                export_format=export_format,
+                user_id="demo-user",
+                db=db,
+            )
+            if fallback is not None:
+                return fallback
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.warning(f"DuckDB fallback failed: {e}")
+
     # Rewrite download URLs to use the public demo download endpoint
     public_urls = []
     for url in response.download_urls:
-        # url is like /api/dataset/{id}/download?file_name=X
-        # rewrite to /api/demo/download/{id}?file_name=X
         public_url = url.replace(f"/api/dataset/{response.dataset_id}/download", f"/api/demo/download/{response.dataset_id}")
         public_urls.append(public_url)
 
@@ -971,4 +995,104 @@ async def demo_query(
         download_urls=public_urls,
         metadata=response.metadata,
         error_message=response.error_message,
+    )
+
+
+def _run_duckdb_fallback(
+    nl_parser,
+    query_text: str,
+    export_format,
+    user_id: str,
+    db: Session,
+) -> Optional[QuerySubmitResponse]:
+    """
+    Run a DuckDB-native cohort search as a fallback when the standard
+    SQLAlchemy pipeline returns no results. Writes a CSV to /tmp/exports
+    and persists dataset metadata so the download links work.
+    """
+    from app.database import get_duckdb_connection
+    from app.services.duckdb_cohort_search import search_duckdb_cohort
+    from app.models.metadata import DatasetMetadata as DatasetMetadataModel, QueryProvenance as QueryProvenanceModel
+    import uuid as _uuid
+    import csv
+    import os
+
+    # Parse the query to extract criteria
+    parsed = nl_parser.parse(query_text)
+    parsed_dict = parsed.to_dict()
+    criteria = parsed_dict.get("cohort_criteria", [])
+    if not criteria:
+        return None
+
+    conn = get_duckdb_connection()
+    try:
+        result = search_duckdb_cohort(conn, criteria)
+    finally:
+        conn.close()
+
+    subjects = result.get("subjects", [])
+    if not subjects:
+        # Build a helpful message even when no matches
+        msg = result.get("message", "No matches in uploaded data")
+        return QuerySubmitResponse(
+            dataset_id="",
+            status="Failed",
+            row_count=0,
+            column_count=0,
+            download_urls=[],
+            metadata={"fallback": "duckdb", "sql": result.get("sql", ""), "message": msg},
+            error_message=msg,
+        )
+
+    # Write CSV export
+    dataset_id = str(_uuid.uuid4())
+    export_dir = "/tmp/exports"
+    os.makedirs(export_dir, exist_ok=True)
+    csv_path = os.path.join(export_dir, f"{dataset_id}_data.csv")
+
+    columns = list(subjects[0].keys())
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=columns)
+        writer.writeheader()
+        for row in subjects:
+            writer.writerow({k: ("" if v is None else v) for k, v in row.items()})
+
+    # Persist dataset metadata
+    db_meta = DatasetMetadataModel(
+        dataset_id=dataset_id,
+        created_by=user_id,
+        row_count=len(subjects),
+        column_count=len(columns),
+        data_sources=[result.get("table_name") or "uploaded"],
+        export_format=export_format,
+        file_paths=[csv_path],
+    )
+    db_prov = QueryProvenanceModel(
+        provenance_id=str(_uuid.uuid4()),
+        dataset_id=dataset_id,
+        original_query=query_text,
+        parsed_intent=parsed_dict,
+        sql_executed=result.get("sql", ""),
+        execution_time=0,
+        confidence_score=int((parsed_dict.get("confidence", 0) or 0) * 100),
+    )
+    db.add(db_meta)
+    db.add(db_prov)
+    db.commit()
+
+    download_urls = [f"/api/demo/download/{dataset_id}?file_name={os.path.basename(csv_path)}"]
+
+    return QuerySubmitResponse(
+        dataset_id=dataset_id,
+        status="Completed",
+        row_count=len(subjects),
+        column_count=len(columns),
+        download_urls=download_urls,
+        metadata={
+            "fallback": "duckdb",
+            "table_name": result.get("table_name"),
+            "sql": result.get("sql", ""),
+            "message": result.get("message", ""),
+        },
+        error_message=None,
     )
