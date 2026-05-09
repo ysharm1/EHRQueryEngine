@@ -1006,64 +1006,99 @@ def _run_duckdb_fallback(
     db: Session,
 ) -> Optional[QuerySubmitResponse]:
     """
-    Run a DuckDB-native cohort search as a fallback when the standard
-    SQLAlchemy pipeline returns no results. Writes a CSV to /tmp/exports
-    and persists dataset metadata so the download links work.
+    Run LLM-powered DuckDB query as a fallback when the standard
+    SQLAlchemy pipeline returns no results. Uses GPT to generate SQL
+    directly against uploaded tables — handles misspellings, scattered
+    data, and complex JOINs automatically.
     """
     from app.database import get_duckdb_connection
-    from app.services.duckdb_cohort_search import search_duckdb_cohort
+    from app.services.llm_sql_generator import generate_sql, execute_generated_sql
     from app.models.metadata import DatasetMetadata as DatasetMetadataModel, QueryProvenance as QueryProvenanceModel
     import uuid as _uuid
     import csv
     import os
 
-    # Parse the query to extract criteria
-    parsed = nl_parser.parse(query_text)
-    parsed_dict = parsed.to_dict()
-    criteria = parsed_dict.get("cohort_criteria", [])
-    if not criteria:
-        return None
-
     conn = get_duckdb_connection()
     try:
-        result = search_duckdb_cohort(conn, criteria)
-    finally:
-        conn.close()
+        # Step 1: Have LLM generate SQL from the query
+        gen_result = generate_sql(conn, query_text)
+        if gen_result.get("error") or not gen_result.get("sql"):
+            # If LLM fails, fall back to heuristic search
+            from app.services.duckdb_cohort_search import search_duckdb_cohort
+            parsed = nl_parser.parse(query_text)
+            criteria = parsed.to_dict().get("cohort_criteria", [])
+            if not criteria:
+                conn.close()
+                return None
+            result = search_duckdb_cohort(conn, criteria)
+            conn.close()
+            subjects = result.get("subjects", [])
+            if not subjects:
+                msg = result.get("message", "No matches in uploaded data")
+                return QuerySubmitResponse(
+                    dataset_id="",
+                    status="Failed",
+                    row_count=0,
+                    column_count=0,
+                    download_urls=[],
+                    metadata={"fallback": "heuristic", "message": msg},
+                    error_message=msg,
+                )
+            rows = subjects
+            columns = list(subjects[0].keys())
+            sql_used = result.get("sql", "")
+        else:
+            # Step 2: Execute the generated SQL
+            sql = gen_result["sql"]
+            exec_result = execute_generated_sql(conn, sql)
+            conn.close()
 
-    subjects = result.get("subjects", [])
-    if not subjects:
-        # Build a helpful message even when no matches
-        msg = result.get("message", "No matches in uploaded data")
-        return QuerySubmitResponse(
-            dataset_id="",
-            status="Failed",
-            row_count=0,
-            column_count=0,
-            download_urls=[],
-            metadata={"fallback": "duckdb", "sql": result.get("sql", ""), "message": msg},
-            error_message=msg,
-        )
+            if exec_result.get("error") or exec_result["row_count"] == 0:
+                msg = exec_result.get("error") or "No matching data found"
+                return QuerySubmitResponse(
+                    dataset_id="",
+                    status="Failed",
+                    row_count=0,
+                    column_count=0,
+                    download_urls=[],
+                    metadata={"fallback": "llm", "sql": sql, "message": msg},
+                    error_message=msg,
+                )
 
-    # Write CSV export
+            rows = exec_result["rows"]
+            columns = exec_result["columns"]
+            sql_used = sql
+    except Exception as e:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        logger = logging.getLogger(__name__)
+        logger.error(f"DuckDB fallback failed: {e}")
+        return None
+
+    # Step 3: Write CSV export
     dataset_id = str(_uuid.uuid4())
     export_dir = "/tmp/exports"
     os.makedirs(export_dir, exist_ok=True)
     csv_path = os.path.join(export_dir, f"{dataset_id}_data.csv")
 
-    columns = list(subjects[0].keys())
     with open(csv_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=columns)
         writer.writeheader()
-        for row in subjects:
+        for row in rows:
             writer.writerow({k: ("" if v is None else v) for k, v in row.items()})
 
-    # Persist dataset metadata
+    # Step 4: Persist metadata
+    parsed = nl_parser.parse(query_text)
+    parsed_dict = parsed.to_dict()
+
     db_meta = DatasetMetadataModel(
         dataset_id=dataset_id,
         created_by=user_id,
-        row_count=len(subjects),
+        row_count=len(rows),
         column_count=len(columns),
-        data_sources=[result.get("table_name") or "uploaded"],
+        data_sources=["uploaded"],
         export_format=export_format,
         file_paths=[csv_path],
     )
@@ -1072,7 +1107,7 @@ def _run_duckdb_fallback(
         dataset_id=dataset_id,
         original_query=query_text,
         parsed_intent=parsed_dict,
-        sql_executed=result.get("sql", ""),
+        sql_executed=sql_used,
         execution_time=0,
         confidence_score=int((parsed_dict.get("confidence", 0) or 0) * 100),
     )
@@ -1085,14 +1120,12 @@ def _run_duckdb_fallback(
     return QuerySubmitResponse(
         dataset_id=dataset_id,
         status="Completed",
-        row_count=len(subjects),
+        row_count=len(rows),
         column_count=len(columns),
         download_urls=download_urls,
         metadata={
-            "fallback": "duckdb",
-            "table_name": result.get("table_name"),
-            "sql": result.get("sql", ""),
-            "message": result.get("message", ""),
+            "fallback": "llm",
+            "sql": sql_used,
         },
         error_message=None,
     )
