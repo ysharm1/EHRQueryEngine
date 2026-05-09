@@ -973,8 +973,20 @@ async def demo_query(
             if fallback is not None:
                 return fallback
         except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
             logger = logging.getLogger(__name__)
-            logger.warning(f"DuckDB fallback failed: {e}")
+            logger.error(f"DuckDB fallback failed: {tb}")
+            # Surface the error so user can see what went wrong
+            return QuerySubmitResponse(
+                dataset_id="",
+                status="Failed",
+                row_count=0,
+                column_count=0,
+                download_urls=[],
+                metadata={},
+                error_message=f"Query failed: {str(e)}",
+            )
 
     # Rewrite download URLs to use the public demo download endpoint
     public_urls = []
