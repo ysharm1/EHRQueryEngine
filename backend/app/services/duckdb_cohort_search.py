@@ -52,8 +52,8 @@ def _first_matching_col(columns: List[str], candidates) -> Optional[str]:
     return None
 
 
-def _list_tables(conn) -> List[Tuple[str, List[str]]]:
-    """Return (table_name, columns) for all non-system DuckDB tables."""
+def _list_tables(conn) -> List[Tuple[str, List[str], int]]:
+    """Return (table_name, columns, row_count) for all non-system DuckDB tables."""
     try:
         tables = conn.execute("SHOW TABLES").fetchall()
         out = []
@@ -62,20 +62,32 @@ def _list_tables(conn) -> List[Tuple[str, List[str]]]:
                 "SELECT column_name FROM information_schema.columns WHERE table_name = ?",
                 [tname]
             ).fetchall()
-            out.append((tname, [c[0] for c in cols]))
+            col_names = [c[0] for c in cols]
+            try:
+                row_count = conn.execute(f"SELECT COUNT(*) FROM \"{tname}\"").fetchone()[0]
+            except Exception:
+                row_count = 0
+            out.append((tname, col_names, row_count))
         return out
     except Exception as e:
         logger.warning(f"Could not list DuckDB tables: {e}")
         return []
 
 
-def _find_patient_table(tables: List[Tuple[str, List[str]]]) -> Optional[Tuple[str, Dict[str, str]]]:
-    """Find the best patient-like table and its key columns."""
+def _find_patient_table(tables: List[Tuple[str, List[str], int]]) -> Optional[Tuple[str, Dict[str, str]]]:
+    """Find the best patient-like table and its key columns.
+
+    Prefers tables with actual data. Empty tables are deprioritized so that
+    user uploads win over system-created empty tables.
+    """
     best = None
     best_score = 0
-    for tname, cols in tables:
+    for tname, cols, row_count in tables:
         id_col = _first_matching_col(cols, _ID_COLS)
         if not id_col:
+            continue
+        # Skip empty tables entirely — they can't contain matches
+        if row_count == 0:
             continue
         sex_col = _first_matching_col(cols, _SEX_COLS)
         dob_col = _first_matching_col(cols, _DOB_COLS)
@@ -84,6 +96,9 @@ def _find_patient_table(tables: List[Tuple[str, List[str]]]) -> Optional[Tuple[s
         tl = tname.lower()
         if "patient" in tl or "subject" in tl or "demograph" in tl:
             score += 5
+        # Strong bonus for tables with lots of rows (user's actual data)
+        if row_count > 0:
+            score += min(5, row_count // 1000 + 1)
         if score > best_score:
             best_score = score
             best = (tname, {"id": id_col, "sex": sex_col, "dob": dob_col})
@@ -91,24 +106,31 @@ def _find_patient_table(tables: List[Tuple[str, List[str]]]) -> Optional[Tuple[s
 
 
 def _find_diagnosis_table(
-    tables: List[Tuple[str, List[str]]],
+    tables: List[Tuple[str, List[str], int]],
     patient_id_col: str,
 ) -> Optional[Tuple[str, Dict[str, str]]]:
-    """Find a diagnosis-like table that can be joined on patient_id."""
-    for tname, cols in tables:
+    """Find a diagnosis-like table that can be joined on patient_id.
+
+    Prefers non-empty tables with obvious diagnosis names.
+    """
+    candidates = []
+    for tname, cols, row_count in tables:
+        if row_count == 0:
+            continue
         id_col = _first_matching_col(cols, _ID_COLS)
         diag_col = _first_matching_col(cols, _DIAG_COLS)
-        if id_col and diag_col:
-            tl = tname.lower()
-            if "diag" in tl or "condition" in tl or "icd" in tl:
-                return (tname, {"id": id_col, "diag": diag_col})
-    # Fallback: any table with a diagnosis column
-    for tname, cols in tables:
-        id_col = _first_matching_col(cols, _ID_COLS)
-        diag_col = _first_matching_col(cols, _DIAG_COLS)
-        if id_col and diag_col:
-            return (tname, {"id": id_col, "diag": diag_col})
-    return None
+        if not (id_col and diag_col):
+            continue
+        tl = tname.lower()
+        score = 1 + min(5, row_count // 1000 + 1)
+        if "diag" in tl or "condition" in tl or "icd" in tl:
+            score += 5
+        candidates.append((score, tname, {"id": id_col, "diag": diag_col}))
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: -x[0])
+    return (candidates[0][1], candidates[0][2])
 
 
 def _build_sex_where(sex_col: str, value: str) -> Tuple[str, List[Any]]:
