@@ -112,6 +112,8 @@ def _find_diagnosis_table(
     """Find a diagnosis-like table that can be joined on patient_id.
 
     Prefers non-empty tables with obvious diagnosis names.
+    Falls back to ANY table that has a joinable ID and a text column
+    that could contain diagnosis info.
     """
     candidates = []
     for tname, cols, row_count in tables:
@@ -119,7 +121,11 @@ def _find_diagnosis_table(
             continue
         id_col = _first_matching_col(cols, _ID_COLS)
         diag_col = _first_matching_col(cols, _DIAG_COLS)
-        if not (id_col and diag_col):
+        if not id_col:
+            continue
+        if not diag_col:
+            # No obvious diagnosis column — check if any text column exists
+            # that could contain diagnosis info (broad fallback)
             continue
         tl = tname.lower()
         score = 1 + min(5, row_count // 1000 + 1)
@@ -160,6 +166,58 @@ def _expand_diagnosis_terms(value: str) -> List[str]:
             seen.add(t)
             result.append(t)
     return result
+
+
+def _find_any_table_with_text_match(
+    conn,
+    tables: List[Tuple[str, List[str], int]],
+    patient_id_col: str,
+    patient_table: str,
+    diag_filters: List[str],
+) -> Optional[Tuple[str, Dict[str, str]]]:
+    """
+    Fallback: scan all non-empty tables (except the patient table) for any
+    VARCHAR column that actually contains one of the diagnosis search terms.
+    Returns the first table+column that has a match.
+    """
+    all_terms = []
+    for df in diag_filters:
+        all_terms.extend(_expand_diagnosis_terms(df))
+    if not all_terms:
+        return None
+
+    for tname, cols, row_count in tables:
+        if row_count == 0 or tname == patient_table:
+            continue
+        id_col = _first_matching_col(cols, _ID_COLS)
+        if not id_col:
+            continue
+        # Get VARCHAR columns from this table
+        try:
+            col_types = conn.execute(
+                f"SELECT column_name, data_type FROM information_schema.columns WHERE table_name = ?",
+                [tname]
+            ).fetchall()
+        except Exception:
+            continue
+
+        varchar_cols = [c[0] for c in col_types if "VARCHAR" in (c[1] or "").upper() or "TEXT" in (c[1] or "").upper()]
+
+        for vcol in varchar_cols:
+            # Quick probe: does this column contain any of our search terms?
+            like_clauses = " OR ".join([f"LOWER(CAST(\"{vcol}\" AS VARCHAR)) LIKE ?" for _ in all_terms[:3]])
+            params = [f"%{t}%" for t in all_terms[:3]]
+            try:
+                hit = conn.execute(
+                    f"SELECT 1 FROM \"{tname}\" WHERE {like_clauses} LIMIT 1",
+                    params
+                ).fetchone()
+                if hit:
+                    return (tname, {"id": id_col, "diag": vcol})
+            except Exception:
+                continue
+
+    return None
 
 
 def search_duckdb_cohort(
@@ -217,6 +275,12 @@ def search_duckdb_cohort(
         d_info = _find_diagnosis_table(tables, id_col)
         if d_info:
             diag_table, diag_cols = d_info
+        else:
+            # Fallback: search ALL tables with a joinable ID for any text column
+            # that might contain diagnosis info (scattered data scenario)
+            d_info = _find_any_table_with_text_match(conn, tables, id_col, patient_table, diag_filters)
+            if d_info:
+                diag_table, diag_cols = d_info
 
     # Build SQL
     if diag_table and diag_cols:
