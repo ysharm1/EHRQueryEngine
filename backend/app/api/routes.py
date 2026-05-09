@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from datetime import datetime
 from pathlib import Path
 import pandas as pd
+import logging
 
 from app.database import get_db
 from app.services.auth import AuthService, get_current_user
@@ -870,7 +871,11 @@ async def demo_upload(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+        import traceback
+        tb = traceback.format_exc()
+        logger = logging.getLogger(__name__)
+        logger.error(f"Upload failed: {tb}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)} | Traceback: {tb[-500:]}")
 
 
 # ── Public Demo Endpoint (no auth required) ──────────────────────────────────
