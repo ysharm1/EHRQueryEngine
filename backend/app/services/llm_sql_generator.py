@@ -56,7 +56,8 @@ def _get_table_schemas(conn) -> Dict[str, List[Dict[str, str]]]:
                     })
                 # Get sample values for first few columns to help LLM understand data
                 sample_cols = [c["name"] for c in col_info[:8]]
-                sample_sql = f"SELECT {', '.join(f'\"' + c + '\"' for c in sample_cols)} FROM \"{tname}\" LIMIT 3"
+                quoted_cols = ", ".join('"' + c + '"' for c in sample_cols)
+                sample_sql = f'SELECT {quoted_cols} FROM "{tname}" LIMIT 3'
                 try:
                     sample_rows = conn.execute(sample_sql).fetchall()
                     samples = [dict(zip(sample_cols, row)) for row in sample_rows]
