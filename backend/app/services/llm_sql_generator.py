@@ -27,6 +27,7 @@ Rules:
 7. Limit results to 5000 rows max.
 8. If you cannot answer the query from the available tables, return: SELECT 'NO_MATCH' AS error, 'explanation here' AS reason
 9. Return ONLY the SQL query, no explanation, no markdown, no code fences.
+10. Always add LIMIT 50000 at the end unless the query is an aggregation (COUNT, AVG, SUM, etc.).
 
 Common medical knowledge:
 - Diabetes: ICD-10 codes E10.x, E11.x; ICD-9 codes 250.x; keywords: diabetes, diabetic, DM
@@ -129,6 +130,13 @@ Generate a DuckDB SQL query that answers the user's question. Return ONLY the SQ
             lines = sql.split("\n")
             sql = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
         sql = sql.strip().rstrip(";")
+
+        # Replace any existing LIMIT with 50000
+        import re
+        sql = re.sub(r'\bLIMIT\s+\d+\b', 'LIMIT 50000', sql, flags=re.IGNORECASE)
+        # Add LIMIT if not present and not an aggregation-only query
+        if 'LIMIT' not in sql.upper():
+            sql = sql + ' LIMIT 50000'
 
         # Safety check: only allow SELECT
         sql_upper = sql.upper().strip()
