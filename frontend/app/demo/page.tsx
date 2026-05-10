@@ -441,8 +441,8 @@ export default function DemoPage() {
                   <>
                     <div className="grid grid-cols-3 gap-3">
                       {[
-                        { label: 'Subjects Found', value: result.row_count, color: 'text-blue-400' },
-                        { label: 'Variables', value: result.column_count, color: 'text-purple-400' },
+                        { label: 'Rows Returned', value: result.row_count.toLocaleString(), color: 'text-blue-400' },
+                        { label: 'Columns', value: result.column_count, color: 'text-purple-400' },
                         { label: 'Execution', value: result.metadata?.execution_time ? `${result.metadata.execution_time.toFixed(2)}s` : '—', color: 'text-emerald-400' },
                       ].map(stat => (
                         <div key={stat.label} className="rounded-xl border border-white/10 bg-white/5 p-4 text-center">
@@ -452,35 +452,38 @@ export default function DemoPage() {
                       ))}
                     </div>
 
-                    {result.metadata?.confidence_score != null && (
-                      <div className="rounded-xl border border-white/10 bg-white/5 p-4 flex items-center justify-between text-sm">
-                        <span className="text-white/50">Query confidence</span>
-                        <div className="flex items-center gap-2">
-                          <div className="w-24 h-1.5 rounded-full bg-white/10 overflow-hidden">
-                            <div className="h-full rounded-full bg-emerald-400" style={{ width: `${(result.metadata.confidence_score * 100).toFixed(0)}%` }} />
-                          </div>
-                          <span className="text-emerald-400 font-medium text-xs">{(result.metadata.confidence_score * 100).toFixed(0)}%</span>
-                        </div>
-                      </div>
-                    )}
-
+                    {/* Download + SQL proof */}
                     {result.download_urls?.length > 0 && (
-                      <div className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
-                        <p className="text-xs text-white/40 uppercase tracking-widest">Download Dataset</p>
+                      <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs text-emerald-400/70 uppercase tracking-widest font-medium">✓ Data Pull Ready</p>
+                          <span className="text-xs text-white/30">{result.row_count.toLocaleString()} rows</span>
+                        </div>
                         <div className="flex flex-wrap gap-2">
                           {result.download_urls.map((url, i) => {
                             const filename = url.split('?')[0].split('/').pop() || `file-${i}`;
                             const ext = filename.split('.').pop()?.toUpperCase() || 'FILE';
                             return (
                               <button key={url} onClick={() => downloadFile(url)}
-                                className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 px-4 py-2 text-sm font-medium transition-colors">
-                                <span>{FILE_ICONS[ext] || '📄'}</span>
-                                <span className="text-white/80">{ext}</span>
-                                <span className="text-white/40 text-xs">{filename}</span>
+                                className="flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 px-4 py-2 text-sm font-medium transition-colors text-emerald-400">
+                                <span>⬇</span>
+                                <span>Download {ext}</span>
+                                <span className="text-emerald-400/50 text-xs font-mono">{filename}</span>
                               </button>
                             );
                           })}
                         </div>
+                        {/* SQL proof */}
+                        {result.metadata?.sql && (
+                          <details className="group">
+                            <summary className="cursor-pointer text-xs text-white/40 hover:text-white/60 transition-colors select-none">
+                              View SQL used to generate this result ▸
+                            </summary>
+                            <pre className="mt-2 rounded-lg bg-black/40 border border-white/10 p-3 text-xs text-green-400/80 font-mono overflow-x-auto whitespace-pre-wrap">
+                              {result.metadata.sql}
+                            </pre>
+                          </details>
+                        )}
                       </div>
                     )}
 
