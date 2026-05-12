@@ -13,168 +13,195 @@ interface UploadResponse {
   sample_data: any[];
 }
 
-export function DataUpload({ onUploadComplete }: { onUploadComplete?: () => void }) {
-  const [file, setFile] = useState<File | null>(null);
-  const [tableName, setTableName] = useState('');
-  const [uploading, setUploading] = useState(false);
-  const [result, setResult] = useState<UploadResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
+interface UploadedFile {
+  id: string;
+  fileName: string;
+  tableName: string;
+  rowsImported: number;
+  columns: string[];
+}
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    if (selectedFile) {
-      setFile(selectedFile);
-      // Auto-generate table name from filename
-      const name = selectedFile.name
-        .replace(/\.[^/.]+$/, '') // Remove extension
-        .toLowerCase()
-        .replace(/[^a-z0-9]/g, '_'); // Replace non-alphanumeric with underscore
-      setTableName(name);
-      setResult(null);
-      setError(null);
-    }
+export function DataUpload({ onUploadComplete }: { onUploadComplete?: () => void }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+
+  const ACCEPTED_EXTENSIONS = ['.csv', '.xlsx', '.xls', '.json', '.parquet'];
+
+  const addFiles = (newFiles: File[]) => {
+    const valid = newFiles.filter((f) =>
+      ACCEPTED_EXTENSIONS.some((ext) => f.name.toLowerCase().endsWith(ext))
+    );
+    if (valid.length === 0) return;
+    setFiles((prev) => [...prev, ...valid]);
+    setError(null);
   };
 
-  const handleUpload = async () => {
-    if (!file) return;
+  const removeFile = (idx: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== idx));
+  };
 
+  const removeUploaded = (id: string) => {
+    setUploadedFiles((prev) => prev.filter((f) => f.id !== id));
+  };
+
+  const handleUploadAll = async () => {
+    if (files.length === 0) return;
     setUploading(true);
     setError(null);
-    setResult(null);
 
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      if (tableName) {
+    for (const file of files) {
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        const tableName = file.name
+          .replace(/\.[^/.]+$/, '')
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, '_');
         formData.append('table_name', tableName);
-      }
 
-      const response = await apiClient.post('/api/upload', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
+        const response = await apiClient.post('/api/upload', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
 
-      setResult(response.data);
-      if (onUploadComplete) {
-        onUploadComplete();
+        setUploadedFiles((prev) => [
+          ...prev,
+          {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            fileName: file.name,
+            tableName: response.data.table_name,
+            rowsImported: response.data.rows_imported,
+            columns: response.data.columns,
+          },
+        ]);
+      } catch (err: any) {
+        setError(`Failed to upload ${file.name}: ${err.response?.data?.detail || err.message}`);
       }
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Upload failed');
-    } finally {
-      setUploading(false);
     }
+
+    setFiles([]);
+    setUploading(false);
+    if (onUploadComplete) onUploadComplete();
+  };
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    addFiles(Array.from(e.dataTransfer.files));
+  };
+
+  const onFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    addFiles(Array.from(e.target.files || []));
+    e.target.value = '';
   };
 
   return (
-    <div className="bg-white rounded-lg shadow p-6">
-      <h2 className="text-xl font-semibold mb-4">Upload Data</h2>
-      
-      <div className="space-y-4">
-        {/* File Input */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Select File
-          </label>
+    <div className="space-y-6">
+      {/* Drop Zone */}
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={onDrop}
+        className={`relative rounded-xl border-2 border-dashed p-10 text-center transition-all ${
+          dragOver ? 'border-blue-400 bg-blue-50' : 'border-gray-200 bg-white hover:border-gray-300'
+        }`}
+      >
+        <div className="space-y-4">
+          <div className="mx-auto w-12 h-12 rounded-full bg-green-50 flex items-center justify-center">
+            <svg className="w-6 h-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+          </div>
+          <div>
+            <p className="text-base font-medium text-gray-700">Drop data files here</p>
+            <p className="text-sm text-gray-500 mt-1">CSV, Excel, JSON, or Parquet — select multiple</p>
+          </div>
           <input
             type="file"
             accept=".csv,.xlsx,.xls,.json,.parquet"
-            onChange={handleFileChange}
-            className="block w-full text-sm text-gray-500
-              file:mr-4 file:py-2 file:px-4
-              file:rounded-md file:border-0
-              file:text-sm file:font-semibold
-              file:bg-blue-50 file:text-blue-700
-              hover:file:bg-blue-100"
+            multiple
+            onChange={onFileSelect}
+            className="hidden"
+            id="data-upload-input"
           />
-          <p className="mt-1 text-xs text-gray-500">
-            Supported formats: CSV, Excel (.xlsx, .xls), JSON, Parquet
-          </p>
+          <label
+            htmlFor="data-upload-input"
+            className="inline-flex items-center px-5 py-2.5 rounded-lg bg-green-600 text-white text-sm font-medium cursor-pointer hover:bg-green-700 transition-colors shadow-sm"
+          >
+            Select Files
+          </label>
         </div>
-
-        {/* Table Name Input */}
-        {file && (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Table Name (optional)
-            </label>
-            <input
-              type="text"
-              value={tableName}
-              onChange={(e) => setTableName(e.target.value)}
-              placeholder="Auto-generated from filename"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <p className="mt-1 text-xs text-gray-500">
-              Data will be imported into this table
-            </p>
-          </div>
-        )}
-
-        {/* Upload Button */}
-        <button
-          onClick={handleUpload}
-          disabled={!file || uploading}
-          className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-        >
-          {uploading ? 'Uploading...' : 'Upload and Import'}
-        </button>
-
-        {/* Error Message */}
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
-            <p className="font-semibold">Upload Failed</p>
-            <p className="text-sm">{error}</p>
-          </div>
-        )}
-
-        {/* Success Message */}
-        {result && (
-          <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded">
-            <p className="font-semibold">✓ {result.message}</p>
-            <div className="mt-2 text-sm space-y-1">
-              <p>Table: <span className="font-mono">{result.table_name}</span></p>
-              <p>Rows imported: {result.rows_imported.toLocaleString()}</p>
-              <p>Columns: {result.columns.length}</p>
-            </div>
-
-            {/* Sample Data Preview */}
-            {result.sample_data && result.sample_data.length > 0 && (
-              <div className="mt-4">
-                <p className="font-semibold mb-2">Sample Data (first 5 rows):</p>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-xs border border-gray-300">
-                    <thead className="bg-gray-100">
-                      <tr>
-                        {result.columns.map((col) => (
-                          <th key={col} className="px-2 py-1 border border-gray-300 text-left">
-                            {col}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {result.sample_data.map((row, idx) => (
-                        <tr key={idx} className="hover:bg-gray-50">
-                          {result.columns.map((col) => (
-                            <td key={col} className="px-2 py-1 border border-gray-300">
-                              {String(row[col] ?? '')}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            <p className="mt-4 text-sm">
-              You can now query this data using the chat interface!
-            </p>
-          </div>
-        )}
       </div>
+
+      {/* Pending Files */}
+      {files.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+            <p className="text-sm font-medium text-gray-700">{files.length} file{files.length > 1 ? 's' : ''} ready to upload</p>
+            <button
+              onClick={handleUploadAll}
+              disabled={uploading}
+              className="px-4 py-1.5 rounded-md bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-50"
+            >
+              {uploading ? 'Uploading…' : 'Upload All'}
+            </button>
+          </div>
+          <div className="divide-y divide-gray-50">
+            {files.map((file, idx) => (
+              <div key={idx} className="px-5 py-2.5 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-gray-800">{file.name}</span>
+                  <span className="text-xs text-gray-400">{(file.size / 1024).toFixed(0)} KB</span>
+                </div>
+                <button
+                  onClick={() => removeFile(idx)}
+                  className="text-xs text-red-500 hover:text-red-700"
+                  aria-label={`Remove ${file.name}`}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Error */}
+      {error && (
+        <div className="rounded-lg bg-red-50 p-4">
+          <p className="text-sm text-red-700">{error}</p>
+        </div>
+      )}
+
+      {/* Uploaded Files */}
+      {uploadedFiles.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="px-5 py-3 border-b border-gray-100">
+            <p className="text-sm font-medium text-gray-700">Uploaded Data</p>
+          </div>
+          <div className="divide-y divide-gray-50">
+            {uploadedFiles.map((uf) => (
+              <div key={uf.id} className="px-5 py-3 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-800">{uf.fileName}</p>
+                  <p className="text-xs text-gray-500">
+                    Table: <span className="font-mono">{uf.tableName}</span> · {uf.rowsImported.toLocaleString()} rows · {uf.columns.length} columns
+                  </p>
+                </div>
+                <button
+                  onClick={() => removeUploaded(uf.id)}
+                  className="text-xs text-gray-400 hover:text-red-600"
+                  aria-label={`Remove ${uf.fileName}`}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
