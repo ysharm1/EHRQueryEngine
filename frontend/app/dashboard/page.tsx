@@ -2,12 +2,17 @@
 
 import { useState } from 'react';
 import ProtectedRoute from '@/components/protected-route';
+import ChatInterface from '@/components/chat-interface';
+import DatasetExplorer from '@/components/dataset-explorer';
+import DatasetExport from '@/components/dataset-export';
+import { DataUpload } from '@/components/data-upload';
 import ExtractionDashboard from '@/components/extraction-dashboard';
 import ExtractionConfig from '@/components/extraction-config';
 import { useAuth } from '@/lib/auth-context';
 
 export default function DashboardPage() {
-  const [activeTab, setActiveTab] = useState<'upload' | 'config'>('upload');
+  const [activeTab, setActiveTab] = useState<'extract' | 'data' | 'query' | 'config'>('extract');
+  const [currentDatasetId, setCurrentDatasetId] = useState<string | null>(null);
   const { user, logout } = useAuth();
 
   return (
@@ -62,14 +67,34 @@ export default function DashboardPage() {
           <div className="border-b border-gray-200 mb-8">
             <nav className="flex space-x-8">
               <button
-                onClick={() => setActiveTab('upload')}
+                onClick={() => setActiveTab('extract')}
                 className={`pb-3 px-1 text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === 'upload'
+                  activeTab === 'extract'
                     ? 'border-blue-600 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                 }`}
               >
-                Upload &amp; Extract
+                PDF Extraction
+              </button>
+              <button
+                onClick={() => setActiveTab('data')}
+                className={`pb-3 px-1 text-sm font-medium border-b-2 transition-colors ${
+                  activeTab === 'data'
+                    ? 'border-blue-600 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                Upload Data (CSV/Excel)
+              </button>
+              <button
+                onClick={() => setActiveTab('query')}
+                className={`pb-3 px-1 text-sm font-medium border-b-2 transition-colors ${
+                  activeTab === 'query'
+                    ? 'border-blue-600 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                Query Builder
               </button>
               <button
                 onClick={() => setActiveTab('config')}
@@ -85,7 +110,25 @@ export default function DashboardPage() {
           </div>
 
           {/* Tab Content */}
-          {activeTab === 'upload' ? <ExtractionDashboard /> : <ExtractionConfig />}
+          {activeTab === 'extract' && <ExtractionDashboard />}
+
+          {activeTab === 'data' && (
+            <DataUpload onUploadComplete={() => setActiveTab('query')} />
+          )}
+
+          {activeTab === 'query' && (
+            <div className="space-y-8">
+              <ChatInterface onDatasetCreated={setCurrentDatasetId} />
+              {currentDatasetId && (
+                <>
+                  <DatasetExplorer datasetId={currentDatasetId} />
+                  <DatasetExport datasetId={currentDatasetId} />
+                </>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'config' && <ExtractionConfig />}
         </main>
       </div>
     </ProtectedRoute>
