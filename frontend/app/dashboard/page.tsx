@@ -1,134 +1,39 @@
 'use client';
 
-import { useState } from 'react';
 import ProtectedRoute from '@/components/protected-route';
-import ChatInterface from '@/components/chat-interface';
-import DatasetExplorer from '@/components/dataset-explorer';
-import DatasetExport from '@/components/dataset-export';
-import { DataUpload } from '@/components/data-upload';
+import SidebarNav from '@/components/sidebar-nav';
 import ExtractionDashboard from '@/components/extraction-dashboard';
-import ExtractionConfig from '@/components/extraction-config';
-import { useAuth } from '@/lib/auth-context';
+import { DataUpload } from '@/components/data-upload';
 
 export default function DashboardPage() {
-  const [activeTab, setActiveTab] = useState<'extract' | 'data' | 'query' | 'config'>('extract');
-  const [currentDatasetId, setCurrentDatasetId] = useState<string | null>(null);
-  const { user, logout } = useAuth();
-
   return (
     <ProtectedRoute>
-      <div className="min-h-screen bg-gray-50">
-        {/* Navigation */}
-        <nav className="bg-white border-b border-gray-200">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="flex h-16 items-center justify-between">
-              <div className="flex items-center space-x-8">
-                <h1 className="text-xl font-semibold text-gray-900">EHR Query Engine</h1>
-                <div className="hidden md:flex space-x-1">
-                  <a
-                    href="/dashboard"
-                    className="px-3 py-2 rounded-md text-sm font-medium bg-gray-100 text-gray-900"
-                  >
-                    Dashboard
-                  </a>
-                  <a
-                    href="/clinical-query"
-                    className="px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50"
-                  >
-                    Clinical Query
-                  </a>
-                  <a
-                    href="/cohort-search"
-                    className="px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50"
-                  >
-                    Cohort Search
-                  </a>
-                </div>
-              </div>
-              <div className="flex items-center space-x-4">
-                <div className="text-right">
-                  <p className="text-sm font-medium text-gray-900">{user?.username}</p>
-                  <p className="text-xs text-gray-500">{user?.role}</p>
-                </div>
-                <button
-                  onClick={logout}
-                  className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50"
-                >
-                  Sign out
-                </button>
-              </div>
+      <div className="flex h-screen">
+        <SidebarNav />
+        <main className="flex-1 overflow-y-auto bg-gray-50 p-8">
+          <div className="max-w-5xl mx-auto space-y-10">
+            {/* Page header */}
+            <div>
+              <h2 className="text-xl font-semibold text-gray-900">Data Sources</h2>
+              <p className="text-sm text-gray-500 mt-1">Upload and manage your clinical documents and structured datasets.</p>
             </div>
+
+            {/* Clinical PDFs section */}
+            <section>
+              <h3 className="text-base font-medium text-gray-800 mb-4">Clinical PDFs</h3>
+              <div className="bg-white rounded-lg border border-gray-100 shadow-sm p-6">
+                <ExtractionDashboard />
+              </div>
+            </section>
+
+            {/* Structured Data section */}
+            <section>
+              <h3 className="text-base font-medium text-gray-800 mb-4">Structured Data</h3>
+              <div className="bg-white rounded-lg border border-gray-100 shadow-sm p-6">
+                <DataUpload />
+              </div>
+            </section>
           </div>
-        </nav>
-
-        {/* Main Content */}
-        <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-          {/* Tab Navigation */}
-          <div className="border-b border-gray-200 mb-8">
-            <nav className="flex space-x-8">
-              <button
-                onClick={() => setActiveTab('extract')}
-                className={`pb-3 px-1 text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === 'extract'
-                    ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                PDF Extraction
-              </button>
-              <button
-                onClick={() => setActiveTab('data')}
-                className={`pb-3 px-1 text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === 'data'
-                    ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                Upload Data (CSV/Excel)
-              </button>
-              <button
-                onClick={() => setActiveTab('query')}
-                className={`pb-3 px-1 text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === 'query'
-                    ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                Query Builder
-              </button>
-              <button
-                onClick={() => setActiveTab('config')}
-                className={`pb-3 px-1 text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === 'config'
-                    ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                Settings
-              </button>
-            </nav>
-          </div>
-
-          {/* Tab Content */}
-          {activeTab === 'extract' && <ExtractionDashboard />}
-
-          {activeTab === 'data' && (
-            <DataUpload onUploadComplete={() => setActiveTab('query')} />
-          )}
-
-          {activeTab === 'query' && (
-            <div className="space-y-8">
-              <ChatInterface onDatasetCreated={setCurrentDatasetId} />
-              {currentDatasetId && (
-                <>
-                  <DatasetExplorer datasetId={currentDatasetId} />
-                  <DatasetExport datasetId={currentDatasetId} />
-                </>
-              )}
-            </div>
-          )}
-
-          {activeTab === 'config' && <ExtractionConfig />}
         </main>
       </div>
     </ProtectedRoute>

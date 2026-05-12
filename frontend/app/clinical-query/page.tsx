@@ -2,12 +2,12 @@
 
 import { useState } from 'react';
 import ProtectedRoute from '@/components/protected-route';
+import SidebarNav from '@/components/sidebar-nav';
 import ClinicalQueryFiltersPanel from '@/components/clinical-query-filters';
 import EncounterBrowser from '@/components/encounter-browser';
 import AggregationResults from '@/components/aggregation-results';
 import ProvenanceDetailPanel from '@/components/provenance-detail';
 import { clinicalQueryService } from '@/lib/api-services';
-import { useAuth } from '@/lib/auth-context';
 import type {
   ClinicalQueryFilters,
   ClinicalQueryResponse,
@@ -15,8 +15,6 @@ import type {
 } from '@/types';
 
 export default function ClinicalQueryPage() {
-  const { user, logout } = useAuth();
-
   // Filters
   const [filters, setFilters] = useState<ClinicalQueryFilters>({ limit: 100, offset: 0 });
 
@@ -92,36 +90,13 @@ export default function ClinicalQueryPage() {
 
   return (
     <ProtectedRoute>
-      <div className="min-h-screen bg-gray-50">
-        {/* Header */}
-        <nav className="bg-white border-b border-gray-200">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="flex h-16 items-center justify-between">
-              <div className="flex items-center space-x-8">
-                <h1 className="text-xl font-semibold text-gray-900">EHR Query Engine</h1>
-                <div className="hidden md:flex space-x-1">
-                  <a href="/dashboard" className="px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50">Dashboard</a>
-                  <a href="/clinical-query" className="px-3 py-2 rounded-md text-sm font-medium bg-gray-100 text-gray-900">Clinical Query</a>
-                  <a href="/cohort-search" className="px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50">Cohort Search</a>
-                </div>
-              </div>
-              <div className="flex items-center space-x-4">
-                <div className="text-right">
-                  <p className="text-sm font-medium text-gray-900">{user?.username}</p>
-                  <p className="text-xs text-gray-500">{user?.role}</p>
-                </div>
-                <button onClick={logout} className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50">Sign out</button>
-              </div>
-            </div>
-          </div>
-        </nav>
-
-        {/* Main Content */}
-        <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      <div className="flex h-screen">
+        <SidebarNav />
+        <main className="flex-1 overflow-y-auto bg-gray-50 p-8">
           {/* Page Description */}
           <div className="mb-6">
-            <h2 className="text-lg font-semibold text-gray-900">Clinical Query</h2>
-            <p className="text-sm text-gray-600 mt-1">Filter extracted clinical data by patient, visit date, provider type, and metric. Trace any value back to its source PDF.</p>
+            <h2 className="text-xl font-semibold text-gray-900">Patient Analytics</h2>
+            <p className="text-sm text-gray-500 mt-1">Filter extracted clinical data by patient, visit date, provider type, and metric. Trace any value back to its source PDF.</p>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
@@ -143,8 +118,8 @@ export default function ClinicalQueryPage() {
               />
 
               {/* Aggregation Controls */}
-              <div className="bg-white rounded-lg shadow p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Metric Aggregation</h3>
+              <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+                <h3 className="text-base font-semibold text-gray-900 mb-4">Metric Aggregation</h3>
                 <div className="flex flex-wrap gap-3 items-end">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Metric Name</label>
@@ -187,18 +162,18 @@ export default function ClinicalQueryPage() {
 
               {/* Query Results */}
               {queryLoading && (
-                <div className="bg-white rounded-lg shadow p-6">
+                <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
                   <p className="text-gray-400 text-sm">Running query…</p>
                 </div>
               )}
               {queryError && (
-                <div className="bg-white rounded-lg shadow p-6">
+                <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
                   <p className="text-red-600 text-sm">{queryError}</p>
                 </div>
               )}
               {queryResult && !queryLoading && (
-                <div className="bg-white rounded-lg shadow p-6">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+                  <h3 className="text-base font-semibold text-gray-900 mb-2">
                     Query Results ({queryResult.total_count} rows)
                   </h3>
                   {queryResult.rows.length === 0 ? (
