@@ -183,6 +183,24 @@ export default function ExtractionDashboard() {
     }
   };
 
+  const handleDeleteJob = async (jobId: string) => {
+    if (!confirm('Delete this extraction and all associated clinical data?')) return;
+    try {
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/extraction/jobs/${jobId}`,
+        {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` },
+        }
+      );
+      if (!response.ok) throw new Error('Delete failed');
+      fetchJobs();
+      fetchStats();
+    } catch {
+      // silently fail
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'completed': return 'bg-green-50 text-green-700 ring-green-600/20';
@@ -319,6 +337,7 @@ export default function ExtractionDashboard() {
                   <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Records</th>
                   <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Confidence</th>
                   <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                  <th className="px-5 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -336,6 +355,15 @@ export default function ExtractionDashboard() {
                     </td>
                     <td className="px-5 py-3.5 text-sm text-gray-500">
                       {new Date(job.created_at).toLocaleDateString()}
+                    </td>
+                    <td className="px-5 py-3.5 text-right">
+                      <button
+                        onClick={() => handleDeleteJob(job.job_id)}
+                        className="text-xs text-gray-400 hover:text-red-600 transition-colors"
+                        title="Delete extraction and all associated data"
+                      >
+                        Delete
+                      </button>
                     </td>
                   </tr>
                 ))}

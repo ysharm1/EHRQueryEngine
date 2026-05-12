@@ -216,6 +216,56 @@ async def retry_job(job_id: str, current_user: User = Depends(get_current_user))
         conn.close()
 
 
+@router.delete("/jobs/{job_id}")
+async def delete_job(job_id: str, current_user: User = Depends(get_current_user)):
+    """Delete an extraction job and all associated data (clinical records, provenance, PDF file)."""
+    conn = get_duckdb_connection()
+    try:
+        # Get job details first
+        job_row = conn.execute(
+            "SELECT job_id, file_path, patient_id FROM extraction_jobs WHERE job_id = ?",
+            [job_id],
+        ).fetchone()
+        if not job_row:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        file_path = job_row[1]
+
+        # Delete associated data: provenance, clinical records linked via this job
+        conn.execute(
+            "DELETE FROM data_provenance WHERE extraction_job_id = ?", [job_id]
+        )
+        conn.execute(
+            "DELETE FROM note_embeddings WHERE note_id IN "
+            "(SELECT id FROM clinical_notes WHERE source_file = ?)",
+            [file_path or ""],
+        )
+
+        # Delete clinical data linked to this source file
+        tables = [
+            "vital_signs", "lab_results", "diagnoses",
+            "procedures_extracted", "medications", "clinical_notes", "imaging_reports",
+        ]
+        for table in tables:
+            conn.execute(f"DELETE FROM {table} WHERE source_file = ?", [file_path or ""])
+
+        # Delete the job record
+        conn.execute("DELETE FROM extraction_jobs WHERE job_id = ?", [job_id])
+
+        # Delete the PDF file from disk
+        if file_path:
+            try:
+                pdf_path = Path(file_path)
+                if pdf_path.exists():
+                    pdf_path.unlink()
+            except OSError:
+                pass  # File already gone or not accessible
+
+        return {"status": "deleted", "job_id": job_id}
+    finally:
+        conn.close()
+
+
 @router.get("/stats")
 async def get_stats(current_user: User = Depends(get_current_user)):
     """Extraction statistics."""
