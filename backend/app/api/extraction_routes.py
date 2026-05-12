@@ -15,8 +15,15 @@ from app.services.auth import get_current_user
 from app.services.extraction_manager import ExtractionManager
 from app.models.user import User
 
-# Directory for uploaded PDFs — uses Render persistent disk or local fallback
-PDF_UPLOAD_DIR = os.environ.get("PDF_UPLOAD_DIR", "/var/data/pdfs")
+# Directory for uploaded PDFs — uses Render persistent disk or /tmp fallback
+_preferred_dir = os.environ.get("PDF_UPLOAD_DIR", "/var/data/pdfs")
+# Fall back to /tmp if preferred dir isn't writable (free tier / no disk)
+try:
+    os.makedirs(_preferred_dir, exist_ok=True)
+    PDF_UPLOAD_DIR = _preferred_dir
+except OSError:
+    PDF_UPLOAD_DIR = "/tmp/pdfs"
+    os.makedirs(PDF_UPLOAD_DIR, exist_ok=True)
 MAX_UPLOAD_SIZE_MB = 50
 
 router = APIRouter(prefix="/extraction", tags=["extraction"])
