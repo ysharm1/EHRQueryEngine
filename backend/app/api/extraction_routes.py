@@ -16,7 +16,7 @@ from app.services.extraction_manager import ExtractionManager
 from app.models.user import User
 
 # Directory for uploaded PDFs — uses Render persistent disk or /tmp fallback
-_preferred_dir = os.environ.get("PDF_UPLOAD_DIR", "/var/data/pdfs")
+_preferred_dir = os.environ.get("PDF_UPLOAD_DIR", "/opt/render/project/data/pdfs")
 # Fall back to /tmp if preferred dir isn't writable (free tier / no disk)
 try:
     os.makedirs(_preferred_dir, exist_ok=True)

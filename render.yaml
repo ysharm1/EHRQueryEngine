@@ -11,7 +11,9 @@ services:
       - key: JWT_SECRET_KEY
         generateValue: true
       - key: DUCKDB_PATH
-        value: /var/data/warehouse.duckdb
+        value: /opt/render/project/data/warehouse.duckdb
+      - key: PDF_UPLOAD_DIR
+        value: /opt/render/project/data/pdfs
       - key: CORS_ORIGINS
         value: "*"
       - key: APP_ENV
@@ -22,7 +24,7 @@ services:
         value: openai
     disk:
       name: ehrdata-storage
-      mountPath: /var/data
+      mountPath: /opt/render/project/data
       sizeGB: 10
 
   # ── Frontend ─────────────────────────────────────────────────────────────────
