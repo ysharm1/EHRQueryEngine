@@ -59,7 +59,10 @@ export default function ClinicalQueryFiltersPanel({
 
   return (
     <div className="bg-white rounded-lg shadow p-6 space-y-5">
-      <h3 className="text-lg font-semibold text-gray-900">Filters</h3>
+      <div>
+        <h3 className="text-base font-semibold text-gray-900">Filters</h3>
+        <p className="text-xs text-gray-500 mt-1">Narrow results by patient, date, provider, or data type</p>
+      </div>
 
       {/* Patient ID */}
       <div>

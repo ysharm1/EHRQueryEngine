@@ -118,6 +118,12 @@ export default function ClinicalQueryPage() {
 
         {/* Main Content */}
         <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+          {/* Page Description */}
+          <div className="mb-6">
+            <h2 className="text-lg font-semibold text-gray-900">Clinical Query</h2>
+            <p className="text-sm text-gray-600 mt-1">Filter extracted clinical data by patient, visit date, provider type, and metric. Trace any value back to its source PDF.</p>
+          </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
             {/* Left sidebar — filters */}
             <div className="lg:col-span-1 space-y-6">

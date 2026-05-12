@@ -36,7 +36,8 @@ export default function EncounterBrowser({
 
   return (
     <div className="bg-white rounded-lg shadow p-6">
-      <h3 className="text-lg font-semibold text-gray-900 mb-4">Encounter Browser</h3>
+      <h3 className="text-base font-semibold text-gray-900 mb-1">Patient Visits</h3>
+      <p className="text-xs text-gray-500 mb-4">Enter a patient ID to see their encounters. Select one to filter all data to that visit.</p>
 
       <div className="flex gap-2 mb-4">
         <input
@@ -44,15 +45,15 @@ export default function EncounterBrowser({
           value={patientId}
           onChange={(e) => setPatientId(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && search()}
-          className="flex-1 px-3 py-2 border rounded text-sm"
-          placeholder="Enter Patient ID"
+          className="flex-1 px-3 py-2 border border-gray-300 rounded text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          placeholder="Patient ID (e.g. patient-123)"
         />
         <button
           onClick={search}
           disabled={loading}
           className="px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50"
         >
-          {loading ? 'Loading…' : 'Search'}
+          {loading ? 'Loading…' : 'Find Visits'}
         </button>
       </div>
 
