@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { apiGet, apiPost } from '@/lib/api-client';
+import { useState, useEffect, useCallback } from 'react';
+import { apiGet } from '@/lib/api-client';
 
 interface ExtractionJob {
   job_id: string;
@@ -26,62 +26,58 @@ interface ExtractionStats {
   avg_records_per_job: number;
 }
 
+interface UploadItem {
+  id: string;
+  file: File;
+  status: 'pending' | 'uploading' | 'completed' | 'failed';
+  message: string;
+}
+
 export default function ExtractionDashboard() {
   const [jobs, setJobs] = useState<ExtractionJob[]>([]);
   const [stats, setStats] = useState<ExtractionStats | null>(null);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
-
-  // Batch upload state
-  interface UploadItem {
-    file: File;
-    status: 'pending' | 'uploading' | 'completed' | 'failed';
-    message: string;
-  }
   const [uploadQueue, setUploadQueue] = useState<UploadItem[]>([]);
-  const [isProcessingQueue, setIsProcessingQueue] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  const fetchJobs = async () => {
+  const fetchJobs = useCallback(async () => {
     try {
-      const data = await apiGet('/extraction/jobs?limit=50');
+      const data = await apiGet('/api/extraction/jobs?limit=50');
       setJobs(data.jobs || []);
-    } catch (err) {
-      setError('Failed to load jobs');
+    } catch {
+      // silently fail on poll
     }
-  };
+  }, []);
 
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     try {
-      const data = await apiGet('/extraction/stats');
+      const data = await apiGet('/api/extraction/stats');
       setStats(data);
-    } catch (err) {
-      setError('Failed to load stats');
+    } catch {
+      // silently fail on poll
     }
-  };
+  }, []);
 
-  const handleUpload = async (files: File[]) => {
-    const pdfFiles = files.filter((f) => f.name.toLowerCase().endsWith('.pdf'));
-    if (pdfFiles.length === 0) return;
-
-    const newItems: UploadItem[] = pdfFiles.map((file) => ({
-      file,
-      status: 'pending' as const,
-      message: 'Waiting…',
-    }));
-
-    setUploadQueue((prev) => [...prev, ...newItems]);
-  };
-
-  // Process queue sequentially
   useEffect(() => {
+    fetchJobs();
+    fetchStats();
+    const interval = setInterval(() => {
+      fetchJobs();
+      fetchStats();
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [fetchJobs, fetchStats]);
+
+  // Process upload queue sequentially
+  useEffect(() => {
+    if (isProcessing) return;
     const pendingIdx = uploadQueue.findIndex((item) => item.status === 'pending');
-    if (pendingIdx === -1 || isProcessingQueue) return;
+    if (pendingIdx === -1) return;
 
-    setIsProcessingQueue(true);
+    setIsProcessing(true);
 
-    const processItem = async () => {
-      // Mark as uploading
+    const processNext = async () => {
       setUploadQueue((prev) =>
         prev.map((item, i) =>
           i === pendingIdx ? { ...item, status: 'uploading' as const, message: 'Extracting…' } : item
@@ -101,210 +97,219 @@ export default function ExtractionDashboard() {
         );
         if (!response.ok) {
           const err = await response.json().catch(() => ({ detail: 'Upload failed' }));
-          throw new Error(err.detail || 'Upload failed');
+          throw new Error(typeof err.detail === 'string' ? err.detail : 'Upload failed');
         }
         const data = await response.json();
         const msg =
           data.status === 'completed'
-            ? `${data.records_extracted} records (${(data.confidence * 100).toFixed(0)}%)`
+            ? `${data.records_extracted} records extracted (${Math.round((data.confidence || 0) * 100)}% confidence)`
             : data.status === 'failed'
-            ? `Failed: ${data.error_message}`
-            : data.status;
+            ? `Failed: ${data.error_message || 'Unknown error'}`
+            : `Status: ${data.status}`;
 
         setUploadQueue((prev) =>
           prev.map((item, i) =>
             i === pendingIdx
-              ? { ...item, status: data.status === 'failed' ? 'failed' : 'completed', message: msg }
+              ? { ...item, status: (data.status === 'failed' ? 'failed' : 'completed') as 'completed' | 'failed', message: msg }
               : item
           )
         );
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Upload failed';
         setUploadQueue((prev) =>
           prev.map((item, i) =>
-            i === pendingIdx ? { ...item, status: 'failed' as const, message: err.message || 'Failed' } : item
+            i === pendingIdx ? { ...item, status: 'failed' as const, message } : item
           )
         );
       } finally {
-        setIsProcessingQueue(false);
+        setIsProcessing(false);
         fetchJobs();
         fetchStats();
       }
     };
 
-    processItem();
-  }, [uploadQueue, isProcessingQueue]);
+    processNext();
+  }, [uploadQueue, isProcessing, fetchJobs, fetchStats]);
 
-  const clearCompleted = () => {
-    setUploadQueue((prev) => prev.filter((item) => item.status === 'pending' || item.status === 'uploading'));
+  const handleFiles = (files: File[]) => {
+    const pdfFiles = files.filter((f) => f.name.toLowerCase().endsWith('.pdf'));
+    if (pdfFiles.length === 0) return;
+    const newItems: UploadItem[] = pdfFiles.map((file) => ({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      file,
+      status: 'pending' as const,
+      message: 'Waiting…',
+    }));
+    setUploadQueue((prev) => [...prev, ...newItems]);
   };
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    const files = Array.from(e.dataTransfer.files);
-    if (files.length > 0) handleUpload(files);
+    handleFiles(Array.from(e.dataTransfer.files));
   };
 
   const onFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length > 0) handleUpload(files);
+    handleFiles(Array.from(e.target.files || []));
     e.target.value = '';
   };
 
-  useEffect(() => {
-    fetchJobs();
-    fetchStats();
-    const interval = setInterval(() => {
-      fetchJobs();
-      fetchStats();
-    }, 5000); // Poll every 5 seconds
-    return () => clearInterval(interval);
-  }, []);
+  const clearQueue = () => {
+    setUploadQueue((prev) => prev.filter((i) => i.status === 'pending' || i.status === 'uploading'));
+  };
 
-  const getStatusColor = (status: string) => {
+  const getStatusBadge = (status: string) => {
     switch (status) {
-      case 'completed': return 'bg-green-100 text-green-800';
-      case 'failed': return 'bg-red-100 text-red-800';
-      case 'processing': return 'bg-yellow-100 text-yellow-800';
-      default: return 'bg-gray-100 text-gray-800';
+      case 'completed': return 'bg-green-50 text-green-700 ring-green-600/20';
+      case 'failed': return 'bg-red-50 text-red-700 ring-red-600/20';
+      case 'processing': return 'bg-yellow-50 text-yellow-700 ring-yellow-600/20';
+      default: return 'bg-gray-50 text-gray-700 ring-gray-600/20';
     }
   };
 
-  if (error) {
-    return <div className="text-red-600 p-4">{error}</div>;
-  }
-
   return (
-    <div className="space-y-6">
-      {/* PDF Upload */}
+    <div className="space-y-8">
+      {/* Stats Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+          <p className="text-sm text-gray-500">Total Extractions</p>
+          <p className="text-3xl font-semibold text-gray-900 mt-1">{stats?.total_jobs || 0}</p>
+        </div>
+        <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+          <p className="text-sm text-gray-500">Completed</p>
+          <p className="text-3xl font-semibold text-green-600 mt-1">{stats?.completed_jobs || 0}</p>
+        </div>
+        <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+          <p className="text-sm text-gray-500">Success Rate</p>
+          <p className="text-3xl font-semibold text-gray-900 mt-1">{stats?.success_rate ? `${stats.success_rate.toFixed(0)}%` : '—'}</p>
+        </div>
+        <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+          <p className="text-sm text-gray-500">Avg Confidence</p>
+          <p className="text-3xl font-semibold text-gray-900 mt-1">{stats?.avg_confidence ? `${stats.avg_confidence.toFixed(0)}%` : '—'}</p>
+        </div>
+      </div>
+
+      {/* Upload Zone */}
       <div
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}
-        className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
-          dragOver ? 'border-blue-500 bg-blue-50' : 'border-gray-300 bg-white'
+        className={`relative rounded-xl border-2 border-dashed p-10 text-center transition-all ${
+          dragOver
+            ? 'border-blue-400 bg-blue-50'
+            : 'border-gray-200 bg-white hover:border-gray-300'
         }`}
       >
-        <div className="space-y-3">
-          <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-          </svg>
+        <div className="space-y-4">
+          <div className="mx-auto w-12 h-12 rounded-full bg-blue-50 flex items-center justify-center">
+            <svg className="w-6 h-6 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 16v-8m0 0l-3 3m3-3l3 3M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1" />
+            </svg>
+          </div>
           <div>
-            <p className="text-lg font-medium text-gray-700">
-              {isProcessingQueue ? 'Processing PDFs…' : 'Drop clinical PDFs here'}
+            <p className="text-base font-medium text-gray-700">
+              {isProcessing ? 'Processing…' : 'Drop clinical PDFs here'}
             </p>
-            <p className="text-sm text-gray-500 mt-1">Select one or multiple PDF files (max 50MB each)</p>
+            <p className="text-sm text-gray-500 mt-1">
+              Upload one or multiple PDF files for AI extraction
+            </p>
           </div>
           <input
             type="file"
             accept=".pdf"
             multiple
             onChange={onFileSelect}
-            disabled={isProcessingQueue}
             className="hidden"
-            id="pdf-upload"
+            id="pdf-upload-input"
           />
           <label
-            htmlFor="pdf-upload"
-            className={`inline-block px-6 py-2 rounded-md text-sm font-medium cursor-pointer ${
-              isProcessingQueue
-                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                : 'bg-blue-600 text-white hover:bg-blue-700'
-            }`}
+            htmlFor="pdf-upload-input"
+            className="inline-flex items-center px-5 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium cursor-pointer hover:bg-blue-700 transition-colors shadow-sm"
           >
-            {isProcessingQueue ? 'Processing…' : 'Select PDFs'}
+            Select PDFs
           </label>
         </div>
+      </div>
 
-        {/* Batch progress */}
-        {uploadQueue.length > 0 && (
-          <div className="mt-4 text-left max-h-48 overflow-y-auto">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-gray-500">
-                {uploadQueue.filter((i) => i.status === 'completed').length}/{uploadQueue.length} completed
-              </span>
-              {uploadQueue.every((i) => i.status === 'completed' || i.status === 'failed') && (
-                <button onClick={clearCompleted} className="text-xs text-blue-600 hover:underline">
-                  Clear
-                </button>
-              )}
-            </div>
-            {uploadQueue.map((item, idx) => (
-              <div key={idx} className="flex items-center gap-3 py-1.5 border-t border-gray-100 text-sm">
-                <span className="flex-shrink-0">
-                  {item.status === 'pending' && <span className="text-gray-400">⏳</span>}
-                  {item.status === 'uploading' && <span className="text-yellow-500 animate-pulse">⚙️</span>}
-                  {item.status === 'completed' && <span className="text-green-600">✓</span>}
-                  {item.status === 'failed' && <span className="text-red-600">✗</span>}
+      {/* Upload Queue */}
+      {uploadQueue.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+            <p className="text-sm font-medium text-gray-700">
+              Upload Progress — {uploadQueue.filter((i) => i.status === 'completed').length}/{uploadQueue.length} complete
+            </p>
+            {uploadQueue.every((i) => i.status === 'completed' || i.status === 'failed') && (
+              <button onClick={clearQueue} className="text-xs text-blue-600 hover:text-blue-800 font-medium">
+                Clear
+              </button>
+            )}
+          </div>
+          <div className="divide-y divide-gray-50 max-h-64 overflow-y-auto">
+            {uploadQueue.map((item) => (
+              <div key={item.id} className="px-5 py-3 flex items-center gap-3">
+                <span className="flex-shrink-0 text-base">
+                  {item.status === 'pending' && '⏳'}
+                  {item.status === 'uploading' && <span className="animate-pulse">⚙️</span>}
+                  {item.status === 'completed' && '✅'}
+                  {item.status === 'failed' && '❌'}
                 </span>
-                <span className="truncate flex-1 text-gray-700">{item.file.name}</span>
-                <span className={`text-xs flex-shrink-0 ${
-                  item.status === 'failed' ? 'text-red-600' : item.status === 'completed' ? 'text-green-600' : 'text-gray-400'
-                }`}>
+                <span className="flex-1 text-sm text-gray-800 truncate">{item.file.name}</span>
+                <span className={`text-xs ${item.status === 'failed' ? 'text-red-600' : item.status === 'completed' ? 'text-green-600' : 'text-gray-400'}`}>
                   {item.message}
                 </span>
               </div>
             ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-white p-4 rounded-lg shadow">
-          <div className="text-sm text-gray-500">Total Jobs</div>
-          <div className="text-2xl font-bold">{stats?.total_jobs || 0}</div>
-        </div>
-        <div className="bg-white p-4 rounded-lg shadow">
-          <div className="text-sm text-gray-500">Completed</div>
-          <div className="text-2xl font-bold text-green-600">{stats?.completed_jobs || 0}</div>
-        </div>
-        <div className="bg-white p-4 rounded-lg shadow">
-          <div className="text-sm text-gray-500">Failed</div>
-          <div className="text-2xl font-bold text-red-600">{stats?.failed_jobs || 0}</div>
-        </div>
-        <div className="bg-white p-4 rounded-lg shadow">
-          <div className="text-sm text-gray-500">Success Rate</div>
-          <div className="text-2xl font-bold">{stats?.success_rate ? `${stats.success_rate.toFixed(1)}%` : '0%'}</div>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-lg shadow overflow-hidden">
-        <div className="px-6 py-4 border-b">
-          <h3 className="text-lg font-semibold">Extraction Jobs</h3>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">File</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Records</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Confidence</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {jobs.map((job) => (
-                <tr key={job.job_id}>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">{job.file_name}</td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(job.status)}`}>
-                      {job.status}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{job.records_extracted}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {job.confidence ? `${(job.confidence * 100).toFixed(0)}%` : '-'}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {new Date(job.created_at).toLocaleString()}
-                  </td>
+      {/* Extraction Jobs Table */}
+      {jobs.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="px-5 py-4 border-b border-gray-100">
+            <h3 className="text-base font-semibold text-gray-900">Recent Extractions</h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="bg-gray-50/50">
+                  <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">File</th>
+                  <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                  <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Records</th>
+                  <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Confidence</th>
+                  <th className="px-5 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {jobs.map((job) => (
+                  <tr key={job.job_id} className="hover:bg-gray-50/50">
+                    <td className="px-5 py-3.5 text-sm font-medium text-gray-900">{job.file_name}</td>
+                    <td className="px-5 py-3.5">
+                      <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset ${getStatusBadge(job.status)}`}>
+                        {job.status}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3.5 text-sm text-gray-600">{job.records_extracted || '—'}</td>
+                    <td className="px-5 py-3.5 text-sm text-gray-600">
+                      {job.confidence ? `${Math.round(job.confidence * 100)}%` : '—'}
+                    </td>
+                    <td className="px-5 py-3.5 text-sm text-gray-500">
+                      {new Date(job.created_at).toLocaleDateString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Empty State */}
+      {jobs.length === 0 && uploadQueue.length === 0 && (
+        <div className="text-center py-12">
+          <p className="text-sm text-gray-500">No extractions yet. Upload a clinical PDF to get started.</p>
+        </div>
+      )}
     </div>
   );
 }
