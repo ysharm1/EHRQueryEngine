@@ -94,42 +94,27 @@ export default function ClinicalQueryPage() {
     <ProtectedRoute>
       <div className="min-h-screen bg-gray-50">
         {/* Header */}
-        <header className="bg-white shadow">
-          <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">Clinical Query</h1>
-                <p className="mt-1 text-sm text-gray-600">
-                  Browse encounters, filter clinical data, and trace provenance
-                </p>
+        <nav className="bg-white border-b border-gray-200">
+          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div className="flex h-16 items-center justify-between">
+              <div className="flex items-center space-x-8">
+                <h1 className="text-xl font-semibold text-gray-900">EHR Query Engine</h1>
+                <div className="hidden md:flex space-x-1">
+                  <a href="/dashboard" className="px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50">Dashboard</a>
+                  <a href="/clinical-query" className="px-3 py-2 rounded-md text-sm font-medium bg-gray-100 text-gray-900">Clinical Query</a>
+                  <a href="/cohort-search" className="px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50">Cohort Search</a>
+                </div>
               </div>
               <div className="flex items-center space-x-4">
-                <a
-                  href="/dashboard"
-                  className="rounded-md bg-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-300"
-                >
-                  Dashboard
-                </a>
-                <a
-                  href="/cohort-search"
-                  className="rounded-md bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-700"
-                >
-                  Cohort Search
-                </a>
                 <div className="text-right">
                   <p className="text-sm font-medium text-gray-900">{user?.username}</p>
-                  <p className="text-xs text-gray-600">{user?.role}</p>
+                  <p className="text-xs text-gray-500">{user?.role}</p>
                 </div>
-                <button
-                  onClick={logout}
-                  className="rounded-md bg-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-300"
-                >
-                  Logout
-                </button>
+                <button onClick={logout} className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50">Sign out</button>
               </div>
             </div>
           </div>
-        </header>
+        </nav>
 
         {/* Main Content */}
         <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">

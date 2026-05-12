@@ -36,46 +36,50 @@ export default function CohortSearchPage() {
     return `${Math.round(score * 100)}% match`;
   };
 
+  const exportCSV = () => {
+    if (results.length === 0) return;
+    const headers = ['patient_id', 'relevant_sentence', 'note_date', 'similarity_score'];
+    const rows = results.map((r) => [
+      r.patient_id,
+      `"${(r.relevant_sentence || '').replace(/"/g, '""')}"`,
+      r.note_date || '',
+      r.similarity_score.toFixed(4),
+    ]);
+    const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `cohort_search_${query.replace(/\s+/g, '_').slice(0, 30)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <ProtectedRoute>
       <div className="min-h-screen bg-gray-50">
         {/* Header */}
-        <header className="bg-white shadow">
-          <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">Cohort Search</h1>
-                <p className="mt-1 text-sm text-gray-600">
-                  Find patients by searching clinical notes with natural language
-                </p>
+        <nav className="bg-white border-b border-gray-200">
+          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div className="flex h-16 items-center justify-between">
+              <div className="flex items-center space-x-8">
+                <h1 className="text-xl font-semibold text-gray-900">EHR Query Engine</h1>
+                <div className="hidden md:flex space-x-1">
+                  <a href="/dashboard" className="px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50">Dashboard</a>
+                  <a href="/clinical-query" className="px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50">Clinical Query</a>
+                  <a href="/cohort-search" className="px-3 py-2 rounded-md text-sm font-medium bg-gray-100 text-gray-900">Cohort Search</a>
+                </div>
               </div>
               <div className="flex items-center space-x-4">
-                <a
-                  href="/dashboard"
-                  className="rounded-md bg-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-300"
-                >
-                  Dashboard
-                </a>
-                <a
-                  href="/clinical-query"
-                  className="rounded-md bg-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-300"
-                >
-                  Clinical Query
-                </a>
                 <div className="text-right">
                   <p className="text-sm font-medium text-gray-900">{user?.username}</p>
-                  <p className="text-xs text-gray-600">{user?.role}</p>
+                  <p className="text-xs text-gray-500">{user?.role}</p>
                 </div>
-                <button
-                  onClick={logout}
-                  className="rounded-md bg-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-300"
-                >
-                  Logout
-                </button>
+                <button onClick={logout} className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50">Sign out</button>
               </div>
             </div>
           </div>
-        </header>
+        </nav>
 
         {/* Main Content */}
         <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
@@ -119,9 +123,17 @@ export default function CohortSearchPage() {
           {/* Results */}
           {!loading && hasSearched && results.length > 0 && (
             <div className="space-y-4">
-              <p className="text-sm text-gray-600">
-                {results.length} matching {results.length === 1 ? 'result' : 'results'}
-              </p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-gray-600">
+                  {results.length} matching {results.length === 1 ? 'result' : 'results'}
+                </p>
+                <button
+                  onClick={exportCSV}
+                  className="inline-flex items-center px-3 py-1.5 rounded-md border border-gray-200 bg-white text-xs font-medium text-gray-700 hover:bg-gray-50 shadow-sm"
+                >
+                  Export CSV
+                </button>
+              </div>
               {results.map((result, idx) => (
                 <div
                   key={`${result.note_id}-${idx}`}

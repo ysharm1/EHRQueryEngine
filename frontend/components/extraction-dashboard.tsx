@@ -36,10 +36,11 @@ interface UploadItem {
 export default function ExtractionDashboard() {
   const [jobs, setJobs] = useState<ExtractionJob[]>([]);
   const [stats, setStats] = useState<ExtractionStats | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [uploadQueue, setUploadQueue] = useState<UploadItem[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [reindexing, setReindexing] = useState(false);
+  const [reindexResult, setReindexResult] = useState<string | null>(null);
 
   const fetchJobs = useCallback(async () => {
     try {
@@ -158,6 +159,30 @@ export default function ExtractionDashboard() {
     setUploadQueue((prev) => prev.filter((i) => i.status === 'pending' || i.status === 'uploading'));
   };
 
+  const handleReindex = async () => {
+    setReindexing(true);
+    setReindexResult(null);
+    try {
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/cohort/reindex`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem('access_token')}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+      if (!response.ok) throw new Error('Reindex failed');
+      const data = await response.json();
+      setReindexResult(`Indexed ${data.notes_processed} notes → ${data.embeddings_created} embeddings`);
+    } catch {
+      setReindexResult('Reindex failed — check API key');
+    } finally {
+      setReindexing(false);
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'completed': return 'bg-green-50 text-green-700 ring-green-600/20';
@@ -187,6 +212,22 @@ export default function ExtractionDashboard() {
           <p className="text-sm text-gray-500">Avg Confidence</p>
           <p className="text-3xl font-semibold text-gray-900 mt-1">{stats?.avg_confidence ? `${stats.avg_confidence.toFixed(0)}%` : '—'}</p>
         </div>
+      </div>
+
+      {/* Quick Actions */}
+      <div className="flex items-center gap-4">
+        <button
+          onClick={handleReindex}
+          disabled={reindexing}
+          className="inline-flex items-center px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 shadow-sm"
+        >
+          {reindexing ? 'Indexing…' : 'Reindex for Cohort Search'}
+        </button>
+        {reindexResult && (
+          <span className={`text-sm ${reindexResult.includes('failed') ? 'text-red-600' : 'text-green-600'}`}>
+            {reindexResult}
+          </span>
+        )}
       </div>
 
       {/* Upload Zone */}
