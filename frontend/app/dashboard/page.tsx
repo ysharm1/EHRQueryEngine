@@ -39,6 +39,12 @@ export default function DashboardPage() {
                 >
                   Clinical Query
                 </a>
+                <a
+                  href="/cohort-search"
+                  className="rounded-md bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-700"
+                >
+                  Cohort Search
+                </a>
                 <button
                   onClick={() => setShowUpload(!showUpload)}
                   className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"

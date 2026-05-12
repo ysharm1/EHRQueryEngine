@@ -27,6 +27,19 @@ CREATE TABLE IF NOT EXISTS encounters (
 );
 """
 
+CREATE_NOTE_EMBEDDINGS_TABLE = """
+CREATE TABLE IF NOT EXISTS note_embeddings (
+    embedding_id VARCHAR PRIMARY KEY,
+    note_id VARCHAR NOT NULL,
+    patient_id VARCHAR NOT NULL,
+    chunk_text VARCHAR NOT NULL,
+    embedding FLOAT[1536] NOT NULL,
+    recorded_at TIMESTAMP,
+    encounter_id VARCHAR,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 CREATE_DATA_PROVENANCE_TABLE = """
 CREATE TABLE IF NOT EXISTS data_provenance (
     provenance_id VARCHAR PRIMARY KEY,
@@ -107,6 +120,16 @@ def _build_index_statements() -> list[str]:
         "ON data_provenance(data_record_id, data_table);"
     )
 
+    # Indexes on note_embeddings
+    stmts.append(
+        "CREATE INDEX IF NOT EXISTS idx_note_embeddings_patient "
+        "ON note_embeddings(patient_id);"
+    )
+    stmts.append(
+        "CREATE INDEX IF NOT EXISTS idx_note_embeddings_note "
+        "ON note_embeddings(note_id);"
+    )
+
     return stmts
 
 
@@ -121,7 +144,8 @@ def run_clinical_schema_migration(conn) -> None:
         # 1. Create new tables
         conn.execute(CREATE_ENCOUNTERS_TABLE)
         conn.execute(CREATE_DATA_PROVENANCE_TABLE)
-        logger.info("Created encounters and data_provenance tables (if not exist)")
+        conn.execute(CREATE_NOTE_EMBEDDINGS_TABLE)
+        logger.info("Created encounters, data_provenance, and note_embeddings tables (if not exist)")
 
         # 2. Add columns to existing clinical data tables
         for stmt in _build_alter_statements():

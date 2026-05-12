@@ -5,12 +5,15 @@ via REST endpoints for the clinical query frontend.
 
 Implements Requirements 5.1, 5.2, 5.3, 5.6, 5.7, 3.4, 1.6
 """
+import json
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
-from app.database import get_duckdb_connection
+from app.database import get_db, get_duckdb_connection
+from app.services.audit_log import AuditLogService
 from app.services.auth import get_current_user
 from app.services.clinical_query_engine import (
     AggregationRequest,
@@ -32,6 +35,7 @@ router = APIRouter(prefix="/clinical", tags=["clinical"])
 class ClinicalQueryRequest(BaseModel):
     patient_id: Optional[str] = None
     encounter_id: Optional[str] = None
+    encounter_date: Optional[str] = None
     date_from: Optional[str] = None
     date_to: Optional[str] = None
     provider_types: Optional[List[str]] = None
@@ -61,12 +65,15 @@ class AggregateRequest(BaseModel):
 @router.post("/query")
 async def clinical_query(
     request: ClinicalQueryRequest,
+    req: Request,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """Query clinical data with flexible filters."""
     filters = ClinicalQueryFilters(
         patient_id=request.patient_id,
         encounter_id=request.encounter_id,
+        encounter_date=request.encounter_date,
         date_from=request.date_from,
         date_to=request.date_to,
         provider_types=request.provider_types,
@@ -85,6 +92,16 @@ async def clinical_query(
     try:
         engine = QueryEngine()
         result = engine.query(conn, filters)
+
+        # Audit logging
+        audit = AuditLogService(db)
+        audit.log_query_submission(
+            user_id=current_user.id,
+            query_text=json.dumps(request.dict()),
+            ip_address=req.client.host if req.client else None,
+            user_agent=req.headers.get("user-agent"),
+        )
+
         return result
     finally:
         conn.close()
@@ -97,7 +114,9 @@ async def clinical_query(
 @router.post("/aggregate")
 async def clinical_aggregate(
     request: AggregateRequest,
+    req: Request,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """Compute aggregated metrics per group."""
     filters = ClinicalQueryFilters(
@@ -123,6 +142,16 @@ async def clinical_aggregate(
     try:
         engine = QueryEngine()
         result = engine.aggregate(conn, filters, agg)
+
+        # Audit logging
+        audit = AuditLogService(db)
+        audit.log_query_submission(
+            user_id=current_user.id,
+            query_text=json.dumps(request.dict()),
+            ip_address=req.client.host if req.client else None,
+            user_agent=req.headers.get("user-agent"),
+        )
+
         return result
     finally:
         conn.close()

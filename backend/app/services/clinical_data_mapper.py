@@ -11,6 +11,7 @@ from typing import Optional
 from app.services.clinical_models import ClinicalRecord, PatientInfo
 from app.services.encounter_manager import EncounterManager
 from app.services.provenance_mapper import ProvenanceMapper
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -263,6 +264,23 @@ class ClinicalDataMapper:
                 "UPDATE clinical_notes SET provenance_id = ? WHERE id = ?",
                 [provenance_id, record_id]
             )
+
+            # Generate embeddings for cohort search (non-blocking)
+            if settings.openai_api_key and n.content:
+                try:
+                    from app.services.cohort_search_engine import CohortSearchEngine
+                    search_engine = CohortSearchEngine(conn)
+                    search_engine.embed_note(
+                        note_id=record_id,
+                        content=n.content,
+                        patient_id=patient_id,
+                        recorded_at=n.recorded_at,
+                        encounter_id=encounter_id,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to embed note {record_id} (non-blocking): {e}"
+                    )
 
     def _insert_imaging(self, conn, patient_id: str, imaging, source_file: str,
                         encounter_id: str, extraction_job_id: str, confidence: float) -> None:

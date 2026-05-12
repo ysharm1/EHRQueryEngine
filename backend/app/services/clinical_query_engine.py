@@ -53,6 +53,7 @@ class ClinicalQueryFilters:
     """Structured filter request for clinical data queries."""
     patient_id: Optional[str] = None
     encounter_id: Optional[str] = None
+    encounter_date: Optional[str] = None
     date_from: Optional[str] = None
     date_to: Optional[str] = None
     provider_types: Optional[List[str]] = None
@@ -84,6 +85,10 @@ def validate_query_filters(filters: ClinicalQueryFilters) -> List[str]:
     errors: List[str] = []
 
     # Date format checks
+    if filters.encounter_date and not _ISO_DATE_RE.match(filters.encounter_date):
+        errors.append(
+            f"encounter_date '{filters.encounter_date}' is not valid ISO 8601 (YYYY-MM-DD)"
+        )
     if filters.date_from and not _ISO_DATE_RE.match(filters.date_from):
         errors.append(
             f"date_from '{filters.date_from}' is not valid ISO 8601 (YYYY-MM-DD)"
@@ -163,6 +168,11 @@ class QueryEngine:
             if filters.date_to:
                 where_clauses.append("e.encounter_date <= ?")
                 params.append(filters.date_to)
+
+            # Exact encounter_date match
+            if filters.encounter_date:
+                where_clauses.append("e.encounter_date = ?")
+                params.append(filters.encounter_date)
 
             # Provider type filter
             if filters.provider_types:
@@ -295,6 +305,9 @@ class QueryEngine:
         if filters.date_to:
             where_clauses.append("e.encounter_date <= ?")
             params.append(filters.date_to)
+        if filters.encounter_date:
+            where_clauses.append("e.encounter_date = ?")
+            params.append(filters.encounter_date)
         if filters.provider_types:
             placeholders = ", ".join(["?"] * len(filters.provider_types))
             where_clauses.append(f"d.provider_type IN ({placeholders})")

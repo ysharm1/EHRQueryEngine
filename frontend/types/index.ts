@@ -205,3 +205,38 @@ export interface EncounterSummary {
   imaging: Record<string, unknown>[];
   provenance: ProvenanceDetail[];
 }
+
+// Cohort Search types
+
+export interface CohortSearchRequest {
+  query: string;
+  top_k: number;
+  threshold: number;
+  patient_id?: string;
+}
+
+export interface CohortSearchResult {
+  patient_id: string;
+  relevant_sentence: string;
+  note_date: string | null;
+  similarity_score: number;
+  note_id: string;
+  encounter_id: string | null;
+}
+
+export interface CohortSearchResponse {
+  results: CohortSearchResult[];
+  total: number;
+}
+
+export interface CohortStats {
+  total_embeddings: number;
+  total_notes: number;
+  last_indexed_at: string | null;
+}
+
+export interface ReindexResponse {
+  notes_processed: number;
+  embeddings_created: number;
+  errors: string[];
+}

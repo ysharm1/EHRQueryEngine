@@ -5,11 +5,12 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db, get_duckdb_connection
+from app.services.audit_log import AuditLogService
 from app.services.auth import get_current_user
 from app.services.extraction_manager import ExtractionManager
 from app.models.user import User
@@ -128,7 +129,9 @@ async def process_pdf(
 @router.post("/upload")
 async def upload_pdf(
     file: UploadFile = File(...),
+    req: Request = None,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """Upload a PDF file and trigger extraction.
 
@@ -167,6 +170,19 @@ async def upload_pdf(
     try:
         manager = _get_manager(conn)
         job = manager.process_pdf(str(dest_path))
+
+        # Audit logging
+        audit = AuditLogService(db)
+        audit.log_pdf_extraction(
+            user_id=current_user.id,
+            file_path=str(dest_path),
+            file_hash="",
+            patient_id=job.patient_id if hasattr(job, "patient_id") else None,
+            records_extracted=job.records_extracted if hasattr(job, "records_extracted") else 0,
+            status="completed" if job.status == "completed" else "failed",
+            error_message=job.error_message if hasattr(job, "error_message") else None,
+        )
+
         return {
             "job_id": job.job_id,
             "status": job.status,
@@ -224,8 +240,23 @@ async def get_config(current_user: User = Depends(get_current_user)):
 
 
 @router.put("/config")
-async def update_config(config: ConfigUpdate, current_user: User = Depends(get_current_user)):
+async def update_config(
+    config: ConfigUpdate,
+    req: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     """Update extraction configuration."""
     with open(CONFIG_PATH, "w") as f:
         json.dump(config.dict(), f, indent=2)
+
+    # Audit logging
+    audit = AuditLogService(db)
+    audit.log_query_submission(
+        user_id=current_user.id,
+        query_text=json.dumps({"action": "config_update", "config": config.dict()}),
+        ip_address=req.client.host if req.client else None,
+        user_agent=req.headers.get("user-agent"),
+    )
+
     return {"status": "updated", "config": config.dict()}

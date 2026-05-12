@@ -379,3 +379,84 @@ class TestGetEncounterSummary:
         assert summary is not None
         for dtype_rows in summary["clinical_data"].values():
             assert dtype_rows == []
+
+
+# ---------------------------------------------------------------------------
+# NULL encounter_date handling (Requirement 2.5)
+# ---------------------------------------------------------------------------
+
+class TestNullEncounterDateHandling:
+    """Verify NULL encounter_date records are excluded from date-filtered queries
+    but included in unfiltered queries."""
+
+    @pytest.fixture
+    def conn_with_null_date(self):
+        """In-memory DuckDB with encounters including NULL encounter_date."""
+        c = duckdb.connect(":memory:")
+        init_extraction_tables(c)
+        run_clinical_schema_migration(c)
+        # Seed patient
+        c.execute("INSERT INTO patients (patient_id) VALUES ('p1')")
+        # Seed encounters: one with date, one without
+        c.execute(
+            "INSERT INTO encounters (encounter_id, patient_id, encounter_date, encounter_type, source_file) "
+            "VALUES ('enc_dated', 'p1', '2024-01-15', 'inpatient', 'a.pdf'), "
+            "       ('enc_null', 'p1', NULL, 'outpatient', 'b.pdf')"
+        )
+        # Seed vitals in both encounters
+        c.execute(
+            "INSERT INTO vital_signs (id, patient_id, vital_name, value, unit, encounter_id, provider_type, recorded_at) VALUES "
+            "('v_dated', 'p1', 'HR', 72, 'bpm', 'enc_dated', 'nurse', '2024-01-15 08:00:00'), "
+            "('v_null', 'p1', 'HR', 80, 'bpm', 'enc_null', 'nurse', '2024-01-15 09:00:00')"
+        )
+        yield c
+        c.close()
+
+    def test_unfiltered_query_includes_null_encounter_date(self, conn_with_null_date):
+        """Records with NULL encounter_date should appear in unfiltered queries."""
+        engine = QueryEngine()
+        result = engine.query(
+            conn_with_null_date,
+            ClinicalQueryFilters(patient_id="p1", data_types=["vitals"]),
+        )
+        ids = [row["id"] for row in result["rows"]]
+        assert "v_dated" in ids
+        assert "v_null" in ids
+
+    def test_date_from_filter_excludes_null_encounter_date(self, conn_with_null_date):
+        """Records with NULL encounter_date should be excluded when date_from is set."""
+        engine = QueryEngine()
+        result = engine.query(
+            conn_with_null_date,
+            ClinicalQueryFilters(patient_id="p1", date_from="2024-01-01", data_types=["vitals"]),
+        )
+        ids = [row["id"] for row in result["rows"]]
+        assert "v_dated" in ids
+        assert "v_null" not in ids
+
+    def test_encounter_date_exact_filter_excludes_null(self, conn_with_null_date):
+        """Records with NULL encounter_date should be excluded when encounter_date exact match is set."""
+        engine = QueryEngine()
+        result = engine.query(
+            conn_with_null_date,
+            ClinicalQueryFilters(patient_id="p1", encounter_date="2024-01-15", data_types=["vitals"]),
+        )
+        ids = [row["id"] for row in result["rows"]]
+        assert "v_dated" in ids
+        assert "v_null" not in ids
+
+    def test_date_range_filter_excludes_null_encounter_date(self, conn_with_null_date):
+        """Records with NULL encounter_date should be excluded when date range is set."""
+        engine = QueryEngine()
+        result = engine.query(
+            conn_with_null_date,
+            ClinicalQueryFilters(
+                patient_id="p1",
+                date_from="2024-01-01",
+                date_to="2024-12-31",
+                data_types=["vitals"],
+            ),
+        )
+        ids = [row["id"] for row in result["rows"]]
+        assert "v_dated" in ids
+        assert "v_null" not in ids

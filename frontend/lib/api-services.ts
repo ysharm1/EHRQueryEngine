@@ -14,6 +14,9 @@ import type {
   Encounter,
   EncounterSummary,
   ProvenanceDetail,
+  CohortSearchResponse,
+  CohortStats,
+  ReindexResponse,
 } from '@/types';
 
 // Authentication services
@@ -168,5 +171,28 @@ export const clinicalQueryService = {
   getProviderTypes: async (): Promise<string[]> => {
     const response = await apiClient.get<{ provider_types: string[] }>('/api/clinical/providers');
     return response.data.provider_types;
+  },
+};
+
+// Cohort Search services
+export const cohortSearchService = {
+  search: async (query: string, top_k: number = 20, threshold: number = 0.3, patient_id?: string): Promise<CohortSearchResponse> => {
+    const response = await apiClient.post<CohortSearchResponse>('/api/cohort/search', {
+      query,
+      top_k,
+      threshold,
+      ...(patient_id && { patient_id }),
+    });
+    return response.data;
+  },
+
+  reindex: async (): Promise<ReindexResponse> => {
+    const response = await apiClient.post<ReindexResponse>('/api/cohort/reindex');
+    return response.data;
+  },
+
+  getStats: async (): Promise<CohortStats> => {
+    const response = await apiClient.get<CohortStats>('/api/cohort/stats');
+    return response.data;
   },
 };

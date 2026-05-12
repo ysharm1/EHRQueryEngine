@@ -110,6 +110,12 @@ export default function ClinicalQueryPage() {
                 >
                   Dashboard
                 </a>
+                <a
+                  href="/cohort-search"
+                  className="rounded-md bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-700"
+                >
+                  Cohort Search
+                </a>
                 <div className="text-right">
                   <p className="text-sm font-medium text-gray-900">{user?.username}</p>
                   <p className="text-xs text-gray-600">{user?.role}</p>
