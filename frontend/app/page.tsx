@@ -7,7 +7,13 @@ export default function Home() {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace('/demo');
+    // Check if already logged in
+    const token = localStorage.getItem('access_token');
+    if (token) {
+      router.replace('/dashboard');
+    } else {
+      router.replace('/login');
+    }
   }, [router]);
 
   return (
