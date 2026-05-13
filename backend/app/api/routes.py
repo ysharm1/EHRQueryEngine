@@ -15,7 +15,7 @@ from pathlib import Path
 import pandas as pd
 import logging
 
-from app.database import get_db
+from app.database import get_db, get_duckdb_connection
 from app.services.auth import AuthService, get_current_user
 from app.services.nl_parser import NLParserService
 from app.services.query_orchestrator import QueryOrchestrator, QueryRequest, QueryStatus
