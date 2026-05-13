@@ -393,6 +393,30 @@ Rules:
         csv_path = export_dir / f"{dataset_id}.csv"
         df.to_csv(csv_path, index=False)
 
+        # Step 5: Save metadata to SQLite so DatasetExplorer/Export can find it
+        from app.models.metadata import DatasetMetadata as DatasetMetadataModel, QueryProvenance as QueryProvenanceModel, ExportFormat as ExportFormatEnum
+        dataset_meta = DatasetMetadataModel(
+            dataset_id=dataset_id,
+            created_by=current_user.id,
+            row_count=len(df),
+            column_count=len(columns),
+            data_sources=request.data_source_ids or ["duckdb"],
+            export_format=ExportFormatEnum.CSV,
+            file_paths=[str(csv_path)],
+        )
+        provenance_record = QueryProvenanceModel(
+            provenance_id=str(uuid.uuid4()),
+            dataset_id=dataset_id,
+            original_query=request.query_text,
+            parsed_intent={"sql": sql, "columns": columns},
+            sql_executed=sql,
+            execution_time=0,
+            confidence_score=95,
+        )
+        db.add(dataset_meta)
+        db.add(provenance_record)
+        db.commit()
+
         # Log success
         audit_service.log_dataset_generation(
             user_id=current_user.id,
