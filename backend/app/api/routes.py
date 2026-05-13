@@ -539,12 +539,13 @@ async def get_dataset(
     )
     if data_file and Path(data_file).exists():
         df = pd.read_csv(data_file, nrows=500)
+        df = df.fillna("").replace([float('inf'), float('-inf')], "")
         rows = df.values.tolist()
         schema_columns = [
             {
                 "name": col,
                 "data_type": str(df[col].dtype),
-                "nullable": bool(df[col].isna().any()),
+                "nullable": True,
                 "description": "",
             }
             for col in df.columns
