@@ -37,19 +37,22 @@ export default function DashboardPage() {
             </div>
 
             {/* Available Data summary */}
-            {tables.length > 0 && (
+            {tables.filter((t) => t.row_count > 0).length > 0 && (
               <div className="bg-white rounded-lg border border-gray-100 shadow-sm p-4">
-                <h3 className="text-sm font-medium text-gray-700 mb-2">Loaded Datasets</h3>
-                <div className="flex flex-wrap gap-2">
-                  {tables.map((t) => (
-                    <span
-                      key={t.table_name}
-                      className="inline-flex items-center gap-1.5 rounded-md bg-green-50 border border-green-200 px-2.5 py-1 text-xs"
-                    >
-                      <span className="font-medium text-green-800">{t.table_name}</span>
-                      <span className="text-green-600">({t.row_count?.toLocaleString()} rows)</span>
-                    </span>
-                  ))}
+                <h3 className="text-sm font-medium text-gray-700 mb-3">Loaded Datasets</h3>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                  {tables
+                    .filter((t) => t.row_count > 0)
+                    .sort((a, b) => b.row_count - a.row_count)
+                    .map((t) => (
+                      <div
+                        key={t.table_name}
+                        className="flex items-center justify-between rounded-md bg-green-50 border border-green-200 px-3 py-2"
+                      >
+                        <span className="text-sm font-medium text-green-800 truncate">{t.table_name}</span>
+                        <span className="text-xs text-green-600 ml-2 shrink-0">{t.row_count?.toLocaleString()}</span>
+                      </div>
+                    ))}
                 </div>
               </div>
             )}

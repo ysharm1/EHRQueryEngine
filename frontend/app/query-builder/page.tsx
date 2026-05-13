@@ -40,23 +40,25 @@ export default function QueryBuilderPage() {
 
             {/* Available Tables */}
             <div className="mb-6 bg-white rounded-lg border border-gray-100 shadow-sm p-4">
-              <h3 className="text-sm font-medium text-gray-700 mb-2">Available Tables</h3>
+              <h3 className="text-sm font-medium text-gray-700 mb-3">Available Datasets</h3>
               {loadingTables ? (
                 <p className="text-xs text-gray-400">Loading…</p>
-              ) : tables.length === 0 ? (
-                <p className="text-xs text-gray-400">No tables found. Upload data on the Data Sources page first.</p>
+              ) : tables.filter((t) => t.row_count > 0).length === 0 ? (
+                <p className="text-xs text-gray-400">No datasets loaded. Upload data on the Data Sources page first.</p>
               ) : (
-                <div className="flex flex-wrap gap-2">
-                  {tables.map((t) => (
-                    <span
-                      key={t.table_name}
-                      className="inline-flex items-center gap-1.5 rounded-md bg-gray-50 border border-gray-200 px-2.5 py-1 text-xs"
-                      title={`Columns: ${t.columns?.join(', ') || 'unknown'}`}
-                    >
-                      <span className="font-medium text-gray-800">{t.table_name}</span>
-                      <span className="text-gray-400">({t.row_count?.toLocaleString()} rows)</span>
-                    </span>
-                  ))}
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                  {tables
+                    .filter((t) => t.row_count > 0)
+                    .sort((a, b) => b.row_count - a.row_count)
+                    .map((t) => (
+                      <div
+                        key={t.table_name}
+                        className="flex items-center justify-between rounded-md bg-gray-50 border border-gray-150 px-3 py-2"
+                      >
+                        <span className="text-sm font-medium text-gray-800 truncate">{t.table_name}</span>
+                        <span className="text-xs text-gray-500 ml-2 shrink-0">{t.row_count?.toLocaleString()}</span>
+                      </div>
+                    ))}
                 </div>
               )}
             </div>
