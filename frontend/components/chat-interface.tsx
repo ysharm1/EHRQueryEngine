@@ -47,7 +47,7 @@ export default function ChatInterface({ onDatasetCreated }: { onDatasetCreated: 
     mutationFn: async (queryText: string) => {
       const res = await apiClient.post<QueryResponse>('/api/query', {
         query_text: queryText,
-        data_source_ids: ['clinical_db'],
+        data_source_ids: [],
         output_format: 'CSV',
       });
       return res.data;
@@ -55,7 +55,7 @@ export default function ChatInterface({ onDatasetCreated }: { onDatasetCreated: 
     onSuccess: (data) => {
       setResponse(data);
       
-      if (data.status === 'Failed' && data.error?.includes('clarify')) {
+      if (data.status === 'Failed') {
         setNeedsClarification(true);
       } else if (data.status === 'Completed') {
         setNeedsClarification(false);
@@ -160,12 +160,12 @@ export default function ChatInterface({ onDatasetCreated }: { onDatasetCreated: 
       )}
 
       {/* Clarification Request */}
-      {needsClarification && response?.error && (
+      {needsClarification && (response?.error || (response as any)?.error_message) && (
         <div className="rounded-lg bg-yellow-50 p-4">
           <h3 className="mb-2 text-sm font-semibold text-yellow-800">
-            Clarification Needed
+            Query Issue
           </h3>
-          <p className="text-sm text-yellow-700">{response.error}</p>
+          <p className="text-sm text-yellow-700">{response?.error || (response as any)?.error_message}</p>
           <p className="mt-2 text-sm text-yellow-600">
             Please refine your query and try again.
           </p>

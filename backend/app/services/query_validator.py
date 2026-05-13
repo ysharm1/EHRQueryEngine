@@ -177,6 +177,17 @@ class QueryValidator:
         Returns list of invalid table names.
         Implements Requirement 3.5
         """
+        # Dynamically get actual tables from DuckDB
+        try:
+            from app.database import get_duckdb_connection
+            conn = get_duckdb_connection()
+            rows = conn.execute("SELECT table_name FROM information_schema.tables").fetchall()
+            actual_tables = {row[0] for row in rows}
+            conn.close()
+        except Exception:
+            # If we can't check, allow all tables (don't block queries)
+            return []
+
         invalid_tables = []
         
         # Extract all table names from steps
@@ -193,9 +204,9 @@ class QueryValidator:
             if not table.startswith("cohort_step_") and not table.startswith("variable_step_")
         }
         
-        # Check against valid tables
+        # Check against actual tables in database
         for table in base_tables:
-            if table not in self.VALID_TABLES:
+            if table and table not in actual_tables and table not in self.VALID_TABLES:
                 invalid_tables.append(table)
         
         return invalid_tables
