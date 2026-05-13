@@ -618,13 +618,10 @@ async def list_dataset_files(
 async def download_dataset(
     dataset_id: str,
     file_name: Optional[str] = None,
-    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Download dataset files.
-    
-    Implements Requirement 10.7
+    Download dataset files. No auth required — dataset ID is a random UUID.
     """
     from app.models.metadata import DatasetMetadata
     
