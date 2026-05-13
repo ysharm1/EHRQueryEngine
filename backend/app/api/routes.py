@@ -225,67 +225,202 @@ async def submit_query(
 ):
     """
     Submit natural language query for dataset generation.
-    
-    Implements Requirements 1.1, 2.1, 3.1, 7.1
+    Uses GPT-4o to generate SQL from the actual DuckDB schema.
     """
-    # Get client info
+    import uuid
+    from datetime import datetime
+    from pathlib import Path
+
     ip_address = req.client.host if req.client else None
     user_agent = req.headers.get("user-agent")
-    
-    # Initialize services
-    nl_parser = NLParserService()
-    orchestrator = QueryOrchestrator(db, nl_parser)
+
     audit_service = AuditLogService(db)
-    
-    # Log query submission
     audit_service.log_query_submission(
         user_id=current_user.id,
         query_text=request.query_text,
         ip_address=ip_address,
         user_agent=user_agent
     )
-    
+
     try:
-        # Convert export format string to enum
-        try:
-            export_format = ExportFormat(request.output_format)
-        except ValueError:
-            export_format = ExportFormat.CSV
-        
-        # Create query request
-        query_request = QueryRequest(
-            user_id=current_user.id,
-            query_text=request.query_text,
-            data_source_ids=request.data_source_ids,
-            output_format=export_format
-        )
-        
-        # Process query
-        response = orchestrator.process_query(query_request)
-        
-        # Log dataset generation if successful
-        if response.status == QueryStatus.COMPLETED:
-            audit_service.log_dataset_generation(
-                user_id=current_user.id,
-                dataset_id=response.dataset_id,
-                cohort_size=response.row_count,
-                variables=[],  # Would extract from metadata
-                export_format=request.output_format,
-                data_sources=request.data_source_ids,
-                ip_address=ip_address,
-                user_agent=user_agent
+        conn = get_duckdb_connection()
+
+        # Step 1: Get actual table schemas from DuckDB
+        tables_info = []
+        table_rows = conn.execute(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
+        ).fetchall()
+
+        for (table_name,) in table_rows:
+            cols = conn.execute(
+                "SELECT column_name, data_type FROM information_schema.columns "
+                "WHERE table_name = ? AND table_schema = 'main' LIMIT 30",
+                [table_name],
+            ).fetchall()
+            row_count = conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
+            if row_count > 0:
+                col_desc = ", ".join([f"{c[0]} ({c[1]})" for c in cols])
+                tables_info.append(f"- {table_name} ({row_count} rows): {col_desc}")
+
+        if not tables_info:
+            conn.close()
+            return QuerySubmitResponse(
+                dataset_id="",
+                status="Failed",
+                row_count=0,
+                column_count=0,
+                download_urls=[],
+                metadata={},
+                error_message="No data tables found. Upload data first.",
             )
-        
-        return QuerySubmitResponse(
-            dataset_id=response.dataset_id,
-            status=response.status.value,
-            row_count=response.row_count,
-            column_count=response.column_count,
-            download_urls=response.download_urls,
-            metadata=response.metadata,
-            error_message=response.error_message
+
+        schema_text = "\n".join(tables_info)
+
+        # Step 2: Ask GPT-4o to generate SQL
+        from app.config import settings
+        if not settings.openai_api_key:
+            conn.close()
+            return QuerySubmitResponse(
+                dataset_id="",
+                status="Failed",
+                row_count=0,
+                column_count=0,
+                download_urls=[],
+                metadata={},
+                error_message="OpenAI API key not configured.",
+            )
+
+        from openai import OpenAI
+        client = OpenAI(api_key=settings.openai_api_key)
+
+        system_prompt = f"""You are a SQL expert. Generate a DuckDB SQL query based on the user's question.
+
+Available tables and columns:
+{schema_text}
+
+Rules:
+- Return ONLY the SQL query, no explanation, no markdown
+- Use DuckDB SQL syntax
+- Always quote table names with double quotes if they contain special characters
+- LIMIT results to 5000 rows max
+- Only SELECT queries allowed (no INSERT, UPDATE, DELETE, DROP)
+- If the user's question is ambiguous, make reasonable assumptions"""
+
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": request.query_text},
+            ],
+            temperature=0.1,
+            max_tokens=1000,
         )
-    
+
+        sql = response.choices[0].message.content.strip()
+        # Strip markdown code fences if present
+        if sql.startswith("```"):
+            sql = sql.split("```")[1]
+            if sql.startswith("sql"):
+                sql = sql[3:]
+            sql = sql.strip()
+        if sql.endswith("```"):
+            sql = sql[:-3].strip()
+
+        # Safety check
+        sql_upper = sql.upper()
+        if any(kw in sql_upper for kw in ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE"]):
+            conn.close()
+            return QuerySubmitResponse(
+                dataset_id="",
+                status="Failed",
+                row_count=0,
+                column_count=0,
+                download_urls=[],
+                metadata={},
+                error_message="Query contains data modification operations. Only SELECT queries are allowed.",
+            )
+
+        # Step 3: Execute SQL
+        try:
+            result = conn.execute(sql).fetchall()
+            columns = [desc[0] for desc in conn.description]
+        except Exception as sql_err:
+            # Retry once with error context
+            retry_response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": request.query_text},
+                    {"role": "assistant", "content": sql},
+                    {"role": "user", "content": f"That SQL failed with error: {sql_err}. Please fix it."},
+                ],
+                temperature=0.1,
+                max_tokens=1000,
+            )
+            sql = retry_response.choices[0].message.content.strip()
+            if sql.startswith("```"):
+                sql = sql.split("```")[1]
+                if sql.startswith("sql"):
+                    sql = sql[3:]
+                sql = sql.strip()
+            if sql.endswith("```"):
+                sql = sql[:-3].strip()
+
+            try:
+                result = conn.execute(sql).fetchall()
+                columns = [desc[0] for desc in conn.description]
+            except Exception as retry_err:
+                conn.close()
+                return QuerySubmitResponse(
+                    dataset_id="",
+                    status="Failed",
+                    row_count=0,
+                    column_count=0,
+                    download_urls=[],
+                    metadata={},
+                    error_message=f"SQL execution failed: {retry_err}",
+                )
+
+        conn.close()
+
+        # Step 4: Save results as CSV
+        import pandas as pd
+        df = pd.DataFrame(result, columns=columns)
+
+        dataset_id = str(uuid.uuid4())
+        export_dir = Path("/tmp/exports")
+        export_dir.mkdir(parents=True, exist_ok=True)
+        csv_path = export_dir / f"{dataset_id}.csv"
+        df.to_csv(csv_path, index=False)
+
+        # Log success
+        audit_service.log_dataset_generation(
+            user_id=current_user.id,
+            dataset_id=dataset_id,
+            cohort_size=len(df),
+            variables=columns,
+            export_format="CSV",
+            data_sources=request.data_source_ids,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+
+        return QuerySubmitResponse(
+            dataset_id=dataset_id,
+            status="Completed",
+            row_count=len(df),
+            column_count=len(columns),
+            download_urls=[f"/api/dataset/{dataset_id}/download?format=CSV"],
+            metadata={
+                "created_at": datetime.now().isoformat(),
+                "created_by": current_user.id,
+                "data_sources": request.data_source_ids,
+                "sql_executed": sql,
+                "columns": columns,
+            },
+            error_message=None,
+        )
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
