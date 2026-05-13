@@ -9,7 +9,8 @@ import DatasetExport from '@/components/dataset-export';
 import { apiGet } from '@/lib/api-client';
 
 interface TableInfo {
-  table_name: string;
+  table_name?: string;
+  name?: string;
   row_count: number;
   columns: string[];
 }
@@ -52,10 +53,10 @@ export default function QueryBuilderPage() {
                     .sort((a, b) => b.row_count - a.row_count)
                     .map((t) => (
                       <div
-                        key={t.table_name}
+                        key={t.table_name || t.name}
                         className="flex items-center justify-between rounded-md bg-gray-50 border border-gray-150 px-3 py-2"
                       >
-                        <span className="text-sm font-medium text-gray-800 truncate">{t.table_name}</span>
+                        <span className="text-sm font-medium text-gray-800 truncate">{t.table_name || t.name}</span>
                         <span className="text-xs text-gray-500 ml-2 shrink-0">{t.row_count?.toLocaleString()}</span>
                       </div>
                     ))}

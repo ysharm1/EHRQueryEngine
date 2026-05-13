@@ -8,7 +8,8 @@ import { DataUpload } from '@/components/data-upload';
 import { apiGet } from '@/lib/api-client';
 
 interface TableInfo {
-  table_name: string;
+  table_name?: string;
+  name?: string;
   row_count: number;
   columns: string[];
 }
@@ -46,10 +47,10 @@ export default function DashboardPage() {
                     .sort((a, b) => b.row_count - a.row_count)
                     .map((t) => (
                       <div
-                        key={t.table_name}
+                        key={t.table_name || t.name}
                         className="flex items-center justify-between rounded-md bg-green-50 border border-green-200 px-3 py-2"
                       >
-                        <span className="text-sm font-medium text-green-800 truncate">{t.table_name}</span>
+                        <span className="text-sm font-medium text-green-800 truncate">{t.table_name || t.name}</span>
                         <span className="text-xs text-green-600 ml-2 shrink-0">{t.row_count?.toLocaleString()}</span>
                       </div>
                     ))}

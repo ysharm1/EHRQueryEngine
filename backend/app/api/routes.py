@@ -247,11 +247,21 @@ async def submit_query(
 
         # Step 1: Get actual table schemas from DuckDB
         tables_info = []
+        # System tables created by the extraction pipeline — hide from GPT
+        SYSTEM_TABLES = {
+            "patients", "vital_signs", "lab_results", "diagnoses",
+            "procedures_extracted", "medications", "clinical_notes",
+            "imaging_reports", "extraction_jobs", "encounters",
+            "data_provenance", "note_embeddings",
+        }
+
         table_rows = conn.execute(
             "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
         ).fetchall()
 
         for (table_name,) in table_rows:
+            if table_name in SYSTEM_TABLES:
+                continue
             cols = conn.execute(
                 "SELECT column_name, data_type FROM information_schema.columns "
                 "WHERE table_name = ? AND table_schema = 'main' LIMIT 30",
@@ -856,9 +866,16 @@ async def list_tables(
     current_user: User = Depends(get_current_user)
 ):
     """
-    List all available tables in DuckDB.
+    List all available user-uploaded tables in DuckDB (excludes system tables).
     """
     from app.database import get_duckdb_connection
+
+    SYSTEM_TABLES = {
+        "patients", "vital_signs", "lab_results", "diagnoses",
+        "procedures_extracted", "medications", "clinical_notes",
+        "imaging_reports", "extraction_jobs", "encounters",
+        "data_provenance", "note_embeddings",
+    }
     
     try:
         conn = get_duckdb_connection()
@@ -866,18 +883,22 @@ async def list_tables(
         # Get all tables
         tables = conn.execute("SHOW TABLES").fetchall()
         
-        # Get row counts for each table
+        # Get row counts for each table, excluding system tables
         table_info = []
         for table in tables:
             table_name = table[0]
-            row_count = conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
-            columns = conn.execute(f"DESCRIBE {table_name}").fetchall()
-            
-            table_info.append({
-                "name": table_name,
-                "row_count": row_count,
-                "columns": [{"name": col[0], "type": col[1]} for col in columns]
-            })
+            if table_name in SYSTEM_TABLES:
+                continue
+            try:
+                row_count = conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
+                columns = conn.execute(f'DESCRIBE "{table_name}"').fetchall()
+                table_info.append({
+                    "name": table_name,
+                    "row_count": row_count,
+                    "columns": [{"name": col[0], "type": col[1]} for col in columns]
+                })
+            except Exception:
+                continue
         
         conn.close()
         
