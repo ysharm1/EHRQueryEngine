@@ -1301,14 +1301,22 @@ async def reset_all_data(
     Delete ALL user-uploaded data, extracted records, embeddings, and PDFs.
     Returns the system to a blank slate. Requires authentication.
     """
-    import shutil
+    import os as _os
 
-    # System tables to preserve (just truncate, don't drop)
-    SYSTEM_TABLES = [
-        "patients", "vital_signs", "lab_results", "diagnoses",
-        "procedures_extracted", "medications", "clinical_notes",
-        "imaging_reports", "extraction_jobs", "encounters",
-        "data_provenance", "note_embeddings",
+    # System tables — delete in reverse dependency order
+    SYSTEM_TABLES_ORDERED = [
+        "note_embeddings",
+        "data_provenance",
+        "vital_signs",
+        "lab_results",
+        "diagnoses",
+        "procedures_extracted",
+        "medications",
+        "clinical_notes",
+        "imaging_reports",
+        "extraction_jobs",
+        "encounters",
+        "patients",
     ]
 
     conn = get_duckdb_connection()
@@ -1318,15 +1326,19 @@ async def reset_all_data(
     try:
         # 1. Get all tables
         all_tables = conn.execute("SHOW TABLES").fetchall()
+        system_set = set(SYSTEM_TABLES_ORDERED)
 
         # 2. Drop user-uploaded tables
         for (table_name,) in all_tables:
-            if table_name not in SYSTEM_TABLES:
-                conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
-                tables_dropped += 1
+            if table_name not in system_set:
+                try:
+                    conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+                    tables_dropped += 1
+                except Exception:
+                    pass
 
-        # 3. Truncate system tables (clear extracted data)
-        for table in SYSTEM_TABLES:
+        # 3. Truncate system tables in dependency order
+        for table in SYSTEM_TABLES_ORDERED:
             try:
                 conn.execute(f'DELETE FROM "{table}"')
             except Exception:
@@ -1335,7 +1347,7 @@ async def reset_all_data(
         conn.close()
 
         # 4. Delete uploaded PDFs
-        pdf_dir = os.environ.get("PDF_UPLOAD_DIR", "/opt/render/project/data/pdfs")
+        pdf_dir = _os.environ.get("PDF_UPLOAD_DIR", "/opt/render/project/data/pdfs")
         if Path(pdf_dir).exists():
             for f in Path(pdf_dir).glob("*"):
                 try:
@@ -1354,11 +1366,14 @@ async def reset_all_data(
                 except Exception:
                     pass
 
-        # 6. Clear SQLite metadata (datasets, provenance, audit logs)
-        from app.models.metadata import DatasetMetadata, QueryProvenance
-        db.query(QueryProvenance).delete()
-        db.query(DatasetMetadata).delete()
-        db.commit()
+        # 6. Clear SQLite metadata
+        try:
+            from app.models.metadata import DatasetMetadata, QueryProvenance
+            db.query(QueryProvenance).delete()
+            db.query(DatasetMetadata).delete()
+            db.commit()
+        except Exception:
+            db.rollback()
 
         return {
             "status": "reset_complete",
@@ -1367,5 +1382,9 @@ async def reset_all_data(
         }
 
     except Exception as e:
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=f"Reset failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Reset failed: {str(e)}")
