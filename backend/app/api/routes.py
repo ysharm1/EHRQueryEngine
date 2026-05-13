@@ -611,7 +611,7 @@ async def upload_data(
             "rows_imported": len(df),
             "columns": list(df.columns),
             "detected_schema": detected_schema.to_dict(),
-            "sample_data": df.head(5).to_dict(orient='records')
+            "sample_data": df.head(5).fillna("").replace([float('inf'), float('-inf')], "").to_dict(orient='records')
         }
     
     except pd.errors.EmptyDataError:
