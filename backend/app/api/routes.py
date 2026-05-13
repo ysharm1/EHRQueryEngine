@@ -1286,3 +1286,86 @@ def _run_duckdb_fallback(
         },
         error_message=None,
     )
+
+
+# ---------------------------------------------------------------------------
+# Admin: Reset all data
+# ---------------------------------------------------------------------------
+
+@router.post("/admin/reset")
+async def reset_all_data(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Delete ALL user-uploaded data, extracted records, embeddings, and PDFs.
+    Returns the system to a blank slate. Requires authentication.
+    """
+    import shutil
+
+    # System tables to preserve (just truncate, don't drop)
+    SYSTEM_TABLES = [
+        "patients", "vital_signs", "lab_results", "diagnoses",
+        "procedures_extracted", "medications", "clinical_notes",
+        "imaging_reports", "extraction_jobs", "encounters",
+        "data_provenance", "note_embeddings",
+    ]
+
+    conn = get_duckdb_connection()
+    tables_dropped = 0
+    files_deleted = 0
+
+    try:
+        # 1. Get all tables
+        all_tables = conn.execute("SHOW TABLES").fetchall()
+
+        # 2. Drop user-uploaded tables
+        for (table_name,) in all_tables:
+            if table_name not in SYSTEM_TABLES:
+                conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+                tables_dropped += 1
+
+        # 3. Truncate system tables (clear extracted data)
+        for table in SYSTEM_TABLES:
+            try:
+                conn.execute(f'DELETE FROM "{table}"')
+            except Exception:
+                pass
+
+        conn.close()
+
+        # 4. Delete uploaded PDFs
+        pdf_dir = os.environ.get("PDF_UPLOAD_DIR", "/opt/render/project/data/pdfs")
+        if Path(pdf_dir).exists():
+            for f in Path(pdf_dir).glob("*"):
+                try:
+                    f.unlink()
+                    files_deleted += 1
+                except Exception:
+                    pass
+
+        # 5. Delete exported CSVs
+        export_dir = Path("/tmp/exports")
+        if export_dir.exists():
+            for f in export_dir.glob("*"):
+                try:
+                    f.unlink()
+                    files_deleted += 1
+                except Exception:
+                    pass
+
+        # 6. Clear SQLite metadata (datasets, provenance, audit logs)
+        from app.models.metadata import DatasetMetadata, QueryProvenance
+        db.query(QueryProvenance).delete()
+        db.query(DatasetMetadata).delete()
+        db.commit()
+
+        return {
+            "status": "reset_complete",
+            "tables_dropped": tables_dropped,
+            "files_deleted": files_deleted,
+        }
+
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"Reset failed: {str(e)}")
