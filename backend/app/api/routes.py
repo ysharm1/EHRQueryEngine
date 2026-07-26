@@ -398,8 +398,8 @@ Rules:
         df = pd.DataFrame(result, columns=columns)
 
         dataset_id = str(uuid.uuid4())
-        export_dir = Path("/tmp/exports")
-        export_dir.mkdir(parents=True, exist_ok=True)
+        from app.database import get_exports_dir
+        export_dir = get_exports_dir()
         csv_path = export_dir / f"{dataset_id}.csv"
         df.to_csv(csv_path, index=False)
 
