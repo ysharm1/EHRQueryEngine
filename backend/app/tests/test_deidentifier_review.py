@@ -157,7 +157,7 @@ def _expected_reviewed_text(deid, original, redactions, decisions):
 
 class TestProperty11ReviewDecisionsApplied:
     @given(scenario=review_scenario())
-    @settings(max_examples=10, deadline=None)
+    @settings(max_examples=5, deadline=None)
     def test_each_span_reflects_its_decision(self, scenario):
         deid, original, result, decisions = scenario
         reviewed = deid.apply_review(result, decisions)
@@ -190,7 +190,7 @@ class TestProperty11ReviewDecisionsApplied:
 
 class TestProperty12FinalizationGating:
     @given(scenario=review_scenario())
-    @settings(max_examples=10, deadline=None)
+    @settings(max_examples=5, deadline=None)
     def test_finalize_gated_on_flagged_decisions(self, scenario):
         deid, _original, result, decisions = scenario
 

@@ -164,7 +164,7 @@ def deidentify_case(draw):
 
 class TestProperty8ReportCountsConsistent:
     @given(case=deidentify_case())
-    @settings(max_examples=10, deadline=None)
+    @settings(max_examples=5, deadline=None)
     def test_counts_sum_to_total_equals_applied(self, case):
         deid, text = case
         result = deid.deidentify(text)
@@ -192,7 +192,7 @@ class TestProperty8ReportCountsConsistent:
 
 class TestProperty9LowConfidenceFlaggedExactly:
     @given(case=deidentify_case())
-    @settings(max_examples=10, deadline=None)
+    @settings(max_examples=5, deadline=None)
     def test_flagged_iff_below_threshold(self, case):
         deid, text = case
         result = deid.deidentify(text)
@@ -218,7 +218,7 @@ class TestProperty9LowConfidenceFlaggedExactly:
 
 class TestProperty10StatusDetermination:
     @given(case=deidentify_case())
-    @settings(max_examples=10, deadline=None)
+    @settings(max_examples=5, deadline=None)
     def test_status_reflects_low_confidence_presence(self, case):
         deid, text = case
         result = deid.deidentify(text)

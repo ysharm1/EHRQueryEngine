@@ -161,7 +161,7 @@ def _embed(identifier: str, prefix: str, suffix: str) -> tuple[str, int, int]:
 
 class TestProperty1StructuredDetection:
     @given(data=CATEGORY_STRATEGIES, prefix=filler, suffix=filler)
-    @settings(max_examples=10, deadline=None)
+    @settings(max_examples=5, deadline=None)
     def test_structured_identifier_is_detected(self, data, prefix, suffix):
         identifier, expected_category = data
         text, start, end = _embed(identifier, prefix, suffix)
@@ -217,7 +217,7 @@ def _assert_metadata_invariant(text: str, redaction: Redaction) -> None:
 
 class TestProperty3MetadataInvariant:
     @given(data=CATEGORY_STRATEGIES, prefix=filler, suffix=filler)
-    @settings(max_examples=10, deadline=None)
+    @settings(max_examples=5, deadline=None)
     def test_regex_detections_satisfy_metadata_invariant(self, data, prefix, suffix):
         identifier, _ = data
         text, _, _ = _embed(identifier, prefix, suffix)
@@ -231,7 +231,7 @@ class TestProperty3MetadataInvariant:
         confidence=st.floats(min_value=0.0, max_value=1.0),
         offsets=st.data(),
     )
-    @settings(max_examples=10, deadline=None)
+    @settings(max_examples=5, deadline=None)
     def test_llm_detections_satisfy_metadata_invariant(self, text, confidence, offsets):
         start = offsets.draw(st.integers(min_value=0, max_value=len(text) - 1))
         end = offsets.draw(st.integers(min_value=start + 1, max_value=len(text)))

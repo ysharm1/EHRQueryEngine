@@ -506,20 +506,33 @@ def _merge_redaction_group(group: list[Redaction]) -> Redaction:
     """Collapse a cluster of mutually overlapping Redactions into one.
 
     The returned Redaction covers ``[min(start), max(end))`` — the contiguous
-    union of the group's covered characters. Its category is chosen sensibly:
-    the widest contributing span wins, ties broken by highest detection
-    precedence. ``original_text`` is reconstructed by laying each contributor's
-    text at its offset within the union (overlaps agree because they share the
-    same source). A preserved year is carried over when the chosen category is
-    DATE and any contributor preserved one.
+    union of the group's covered characters.
+
+    Category selection prefers the **deterministic regex detection**: when the
+    group contains any regex-detected span, the merged redaction takes its
+    category, token, method, and confidence. Regex detectors identify the 18
+    structured Safe Harbor categories by fixed patterns, so their label is
+    authoritative over an overlapping LLM guess (e.g. an SSN the model tagged as
+    OTHER stays ``[SSN]``). Only when no regex span is present does the LLM's
+    category win. Within the chosen pool the widest span wins, ties broken by
+    detection precedence.
+
+    ``original_text`` is reconstructed by laying each contributor's text at its
+    offset within the union (overlaps agree because they share the same source).
+    A preserved year is carried over when the chosen category is DATE and any
+    contributor preserved one.
     """
 
     start = min(r.start for r in group)
     end = max(r.end for r in group)
 
+    # Prefer regex detections; fall back to the whole group (LLM-only spans).
+    regex_spans = [r for r in group if r.method == "regex"]
+    pool = regex_spans if regex_spans else group
+
     # Widest span first; break ties by highest precedence (lowest rank).
     chosen = max(
-        group,
+        pool,
         key=lambda r: (
             r.end - r.start,
             -_PRECEDENCE_RANK.get(r.category, _MAX_RANK),
@@ -549,7 +562,10 @@ def _merge_redaction_group(group: list[Redaction]) -> Redaction:
         original_text=original_text,
         token=REDACTION_TOKENS[chosen.category],
         method=chosen.method,
-        confidence=min(r.confidence for r in group),
+        # Carry the chosen detection's confidence: a regex win restores the
+        # certain 1.0 so a structured identifier is not dragged into review by
+        # an overlapping low-confidence LLM span.
+        confidence=chosen.confidence,
         preserved_year=preserved_year,
     )
 

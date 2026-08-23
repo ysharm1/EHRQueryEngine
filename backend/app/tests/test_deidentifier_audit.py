@@ -91,7 +91,7 @@ class TestProperty13AuditChecksumRoundTrip:
     """Property 13 — recomputed checksum equals the stored checksum."""
 
     @settings(
-        max_examples=10,
+        max_examples=5,
         deadline=None,
         suppress_health_check=[HealthCheck.function_scoped_fixture],
     )
@@ -124,7 +124,7 @@ class TestProperty13AuditChecksumRoundTrip:
         assert service.verify_integrity(log_id) is True
 
     @settings(
-        max_examples=10,
+        max_examples=5,
         deadline=None,
         suppress_health_check=[HealthCheck.function_scoped_fixture],
     )

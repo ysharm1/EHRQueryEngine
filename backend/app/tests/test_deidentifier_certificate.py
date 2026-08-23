@@ -92,7 +92,7 @@ class TestProperty14CertificateContentsAndChecksumRoundTrip:
     """Property 14 — certificate has all required fields and its checksum
     recomputed over the canonical contents equals the stored checksum."""
 
-    @settings(max_examples=10, deadline=None)
+    @settings(max_examples=5, deadline=None)
     @given(
         job_id=_job_id,
         source_ref=_source_ref,

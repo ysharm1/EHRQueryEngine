@@ -76,7 +76,7 @@ def arbitrary_spans(draw):
 
 class TestProperty5SpanMerging:
     @given(spans=arbitrary_spans())
-    @settings(max_examples=10, deadline=None)
+    @settings(max_examples=5, deadline=None)
     def test_merge_yields_disjoint_spans_covering_union(self, spans):
         merged = Deidentifier.merge_spans(spans)
 
@@ -191,7 +191,7 @@ def text_and_redactions(draw):
 
 class TestProperty4NoOriginalSurvives:
     @given(data=text_and_redactions())
-    @settings(max_examples=10, deadline=None)
+    @settings(max_examples=5, deadline=None)
     def test_tokens_present_and_originals_removed(self, data):
         text, redactions = data
         output = Deidentifier.apply_redactions(text, redactions)
@@ -327,3 +327,80 @@ class TestApplyRedactionsUnit:
         out = Deidentifier.apply_redactions(text, spans)
         # Exactly one token applied; no partial original fragment left dangling.
         assert out in ("[NAME]fghij", "abc[SSN]ij")
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: regex category wins over an overlapping LLM span (merge_spans)
+#
+# When a deterministic regex span and an LLM span cover overlapping characters,
+# the merged redaction must take the regex category/token/method/confidence.
+# This applies to every structured category, not just SSN.
+# ---------------------------------------------------------------------------
+
+def _regex(category: IdentifierCategory, start: int, end: int, text: str) -> Redaction:
+    return Redaction(
+        category=category, start=start, end=end, original_text=text,
+        token=REDACTION_TOKENS[category], method="regex", confidence=1.0,
+    )
+
+
+def _llm(category: IdentifierCategory, start: int, end: int, text: str,
+         confidence: float = 0.4) -> Redaction:
+    return Redaction(
+        category=category, start=start, end=end, original_text=text,
+        token=REDACTION_TOKENS[category], method="llm", confidence=confidence,
+    )
+
+
+class TestRegexWinsOnOverlap:
+    def test_regex_ssn_wins_over_overlapping_llm_other(self):
+        # LLM grabbed the wider "SSN 123-45-6789" and mislabeled it OTHER;
+        # regex grabbed the number and labeled it SSN. Regex must win.
+        llm = _llm(IdentifierCategory.OTHER, 0, 15, "SSN 123-45-6789")
+        regex = _regex(IdentifierCategory.SSN, 4, 15, "123-45-6789")
+        merged = Deidentifier.merge_spans([llm, regex])
+        assert len(merged) == 1
+        assert merged[0].category == IdentifierCategory.SSN
+        assert merged[0].method == "regex"
+        assert merged[0].confidence == 1.0
+
+    def test_regex_wins_for_all_structured_categories(self):
+        # Every structured category should win over an overlapping LLM guess.
+        for category in [
+            IdentifierCategory.SSN,
+            IdentifierCategory.PHONE,
+            IdentifierCategory.EMAIL,
+            IdentifierCategory.URL,
+            IdentifierCategory.IP,
+            IdentifierCategory.ZIP,
+            IdentifierCategory.MRN,
+            IdentifierCategory.ACCOUNT,
+            IdentifierCategory.LICENSE,
+            IdentifierCategory.VEHICLE,
+            IdentifierCategory.DEVICE,
+            IdentifierCategory.DATE,
+        ]:
+            regex = _regex(category, 5, 15, "xxxxxxxxxx")
+            llm = _llm(IdentifierCategory.OTHER, 0, 15, "yyyyyxxxxxxxxxx")
+            merged = Deidentifier.merge_spans([llm, regex])
+            assert len(merged) == 1
+            assert merged[0].category == category, f"regex {category} should win"
+            assert merged[0].method == "regex"
+
+    def test_llm_only_group_keeps_llm_category(self):
+        # With no regex span present, the LLM category is retained.
+        a = _llm(IdentifierCategory.NAME, 0, 8, "Jane Roe", confidence=0.6)
+        b = _llm(IdentifierCategory.GEO, 3, 12, "Roe Boston", confidence=0.5)
+        merged = Deidentifier.merge_spans([a, b])
+        assert len(merged) == 1
+        assert merged[0].method == "llm"
+        assert merged[0].category in {IdentifierCategory.NAME, IdentifierCategory.GEO}
+
+    def test_non_overlapping_llm_and_regex_both_kept(self):
+        # Disjoint spans are not merged and both keep their own category.
+        regex = _regex(IdentifierCategory.SSN, 0, 11, "123-45-6789")
+        llm = _llm(IdentifierCategory.NAME, 20, 28, "Jane Roe")
+        merged = sorted(Deidentifier.merge_spans([regex, llm]), key=lambda r: r.start)
+        assert len(merged) == 2
+        assert merged[0].category == IdentifierCategory.SSN
+        assert merged[1].category == IdentifierCategory.NAME

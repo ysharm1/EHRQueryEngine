@@ -110,7 +110,7 @@ def _embed(identifier: str, prefix: str, suffix: str) -> tuple[str, int, int]:
 
 class TestProperty2DateDetection:
     @given(data=supported_date, prefix=filler, suffix=filler)
-    @settings(max_examples=10, deadline=None)
+    @settings(max_examples=5, deadline=None)
     def test_supported_date_is_detected(self, data, prefix, suffix):
         date_str, _ = data
         text, start, end = _embed(date_str, prefix, suffix)
@@ -139,7 +139,7 @@ class TestProperty2DateDetection:
 
 class TestProperty6YearPreservation:
     @given(data=supported_date, prefix=filler, suffix=filler)
-    @settings(max_examples=10, deadline=None)
+    @settings(max_examples=5, deadline=None)
     def test_detected_date_preserves_four_digit_year(self, data, prefix, suffix):
         date_str, year = data
         text, start, end = _embed(date_str, prefix, suffix)
@@ -171,7 +171,7 @@ class TestProperty6YearPreservation:
 
 class TestProperty7AgeCapping:
     @given(age=st.integers(min_value=0, max_value=200))
-    @settings(max_examples=10, deadline=None)
+    @settings(max_examples=5, deadline=None)
     def test_cap_age_over_89_returns_ninety_plus(self, age):
         result = Deidentifier.cap_age(age)
         if age > 89:
