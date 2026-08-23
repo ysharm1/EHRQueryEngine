@@ -18,8 +18,13 @@ services:
         value: /opt/render/project/data/warehouse.duckdb
       - key: PDF_UPLOAD_DIR
         value: /opt/render/project/data/pdfs
+      # Restrict to the known frontend origin instead of "*".
       - key: CORS_ORIGINS
-        value: "*"
+        value: "https://ehrqueryengine-frontend.onrender.com"
+      # Strong admin password for the deployed demo — Render prompts on deploy
+      # (never stored in the repo). Falls back to the dev default if unset.
+      - key: SEED_ADMIN_PASSWORD
+        sync: false
       - key: APP_ENV
         value: production
       - key: LOG_LEVEL

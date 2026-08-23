@@ -76,13 +76,18 @@ def create_sample_data():
     
     from sqlalchemy.exc import IntegrityError
     from app.services.auth import AuthService
+    from app.config import settings
 
+    # Seed credentials come from settings so production can override the demo
+    # defaults via environment variables (SEED_ADMIN_PASSWORD, etc.).
     # Each user is created in its own transaction and duplicates are tolerated,
     # so concurrent/repeated initialization (e.g. multiple app startups) cannot
     # raise a UNIQUE-constraint error on users.username.
     sample_users = [
-        ("admin", "admin@example.com", "admin123", "Admin"),
-        ("researcher", "researcher@example.com", "researcher123", "Researcher"),
+        (settings.seed_admin_username, "admin@example.com",
+         settings.seed_admin_password, "Admin"),
+        (settings.seed_researcher_username, "researcher@example.com",
+         settings.seed_researcher_password, "Researcher"),
     ]
 
     try:

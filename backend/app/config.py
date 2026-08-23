@@ -28,6 +28,13 @@ class Settings(BaseSettings):
     anthropic_api_key: Optional[str] = None
     llm_provider: Literal["openai", "anthropic"] = "openai"
 
+    # Seed accounts — override in production via env vars. The defaults are for
+    # local/demo use only; set strong values before exposing the app publicly.
+    seed_admin_username: str = "admin"
+    seed_admin_password: str = "admin123"
+    seed_researcher_username: str = "researcher"
+    seed_researcher_password: str = "researcher123"
+
     # FHIR
     fhir_base_url: Optional[str] = None
     fhir_auth_token: Optional[str] = None
