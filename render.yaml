@@ -22,6 +22,11 @@ services:
         value: INFO
       - key: LLM_PROVIDER
         value: openai
+      # Secret — Render will prompt for this value on deploy (never stored in
+      # the repo). Required for LLM name/address detection in de-identification
+      # and for real natural-language query. Without it, de-id runs regex-only.
+      - key: OPENAI_API_KEY
+        sync: false
     disk:
       name: ehrdata-storage
       mountPath: /opt/render/project/data
