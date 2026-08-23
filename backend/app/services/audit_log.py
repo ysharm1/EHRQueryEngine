@@ -213,6 +213,76 @@ class AuditLogService:
             error_message=error_message,
         )
 
+    def log_deidentification(
+        self,
+        user_id: Optional[str],
+        source_ref: str,
+        category_counts: Dict[str, int],
+        total_redactions: int,
+        job_id: Optional[str] = None,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> str:
+        """Log a completed de-identification operation.
+
+        Records the user_id, timestamp (stamped by ``_create_log_entry``), the
+        source reference, and the per-category redaction counts, with a SHA-256
+        integrity checksum.
+
+        Implements Requirements 7.1, 7.3
+        """
+        details = {
+            "job_id": job_id,
+            "source_ref": source_ref,
+            "category_counts": category_counts,
+            "total_redactions": total_redactions,
+            "action_type": "deidentify",
+        }
+
+        return self._create_log_entry(
+            user_id=user_id,
+            action="deidentify",
+            details=details,
+            status="success",
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+
+    def log_deidentification_finalize(
+        self,
+        user_id: Optional[str],
+        job_id: str,
+        approved: int,
+        rejected: int,
+        edited: int,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> str:
+        """Log the finalization of a Deidentification_Job by a reviewer.
+
+        Records the reviewer user_id, timestamp, job_id, and the number of
+        redactions approved, rejected, and edited, with a SHA-256 integrity
+        checksum.
+
+        Implements Requirements 7.2, 7.3
+        """
+        details = {
+            "job_id": job_id,
+            "approved": approved,
+            "rejected": rejected,
+            "edited": edited,
+            "action_type": "deidentify_finalize",
+        }
+
+        return self._create_log_entry(
+            user_id=user_id,
+            action="deidentify_finalize",
+            details=details,
+            status="success",
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+
     def _create_log_entry(
         self,
         user_id: Optional[str],

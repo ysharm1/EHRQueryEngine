@@ -240,3 +240,75 @@ export interface ReindexResponse {
   embeddings_created: number;
   errors: string[];
 }
+
+// De-identification types
+
+export interface DeidRedaction {
+  index: number;
+  category: string;
+  start: number;
+  end: number;
+  token: string;
+  method: string;
+  confidence: number;
+}
+
+export interface DeidReport {
+  method: string;
+  category_counts: Record<string, number>;
+  total_redactions: number;
+  low_confidence: DeidRedaction[];
+}
+
+export interface DeidResponse {
+  job_id: string;
+  status: string; // 'needs_review' | 'deidentified'
+  deidentified_text: string;
+  report: DeidReport;
+}
+
+export interface DeidJobSummary {
+  job_id: string;
+  source_ref: string | null;
+  status: string;
+  created_at: string | null;
+  total_redactions: number | null;
+}
+
+export interface DeidJobListResponse {
+  jobs: DeidJobSummary[];
+  total: number;
+}
+
+export interface DeidReviewDecision {
+  redaction_index: number;
+  action: 'approve' | 'reject' | 'edit';
+  replacement?: string;
+}
+
+export interface DeidReviewResponse {
+  job_id: string;
+  status: string;
+  flagged: number;
+  decided: number;
+  can_finalize: boolean;
+}
+
+export interface DeidFinalizeResponse {
+  job_id: string;
+  status: string;
+  approved: number;
+  rejected: number;
+  edited: number;
+}
+
+export interface DeidCertificate {
+  job_id: string;
+  source_ref: string | null;
+  method: string;
+  category_counts: Record<string, number>;
+  total_redactions: number;
+  reviewer_id: string | null;
+  finalized_at: string | null;
+  integrity_checksum: string;
+}

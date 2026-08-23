@@ -17,6 +17,12 @@ import type {
   CohortSearchResponse,
   CohortStats,
   ReindexResponse,
+  DeidResponse,
+  DeidJobListResponse,
+  DeidReviewDecision,
+  DeidReviewResponse,
+  DeidFinalizeResponse,
+  DeidCertificate,
 } from '@/types';
 
 // Authentication services
@@ -193,6 +199,43 @@ export const cohortSearchService = {
 
   getStats: async (): Promise<CohortStats> => {
     const response = await apiClient.get<CohortStats>('/api/cohort/stats');
+    return response.data;
+  },
+};
+
+// De-identification services
+export const deidentifyService = {
+  deidentifyText: async (text: string): Promise<DeidResponse> => {
+    const response = await apiClient.post<DeidResponse>('/api/deidentify', { text });
+    return response.data;
+  },
+
+  deidentifyUpload: async (file: File): Promise<DeidResponse> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await apiClient.post<DeidResponse>('/api/deidentify/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  },
+
+  listJobs: async (limit: number = 100): Promise<DeidJobListResponse> => {
+    const response = await apiClient.get<DeidJobListResponse>(`/api/deidentify/jobs?limit=${limit}`);
+    return response.data;
+  },
+
+  submitReview: async (jobId: string, decisions: DeidReviewDecision[]): Promise<DeidReviewResponse> => {
+    const response = await apiClient.post<DeidReviewResponse>(`/api/deidentify/jobs/${jobId}/review`, { decisions });
+    return response.data;
+  },
+
+  finalize: async (jobId: string): Promise<DeidFinalizeResponse> => {
+    const response = await apiClient.post<DeidFinalizeResponse>(`/api/deidentify/jobs/${jobId}/finalize`);
+    return response.data;
+  },
+
+  getCertificate: async (jobId: string): Promise<DeidCertificate> => {
+    const response = await apiClient.get<DeidCertificate>(`/api/deidentify/report/${jobId}`);
     return response.data;
   },
 };
