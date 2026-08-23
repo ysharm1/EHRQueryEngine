@@ -74,43 +74,38 @@ def create_sample_data():
     SessionLocal = sessionmaker(bind=engine)
     db = SessionLocal()
     
+    from sqlalchemy.exc import IntegrityError
+    from app.services.auth import AuthService
+
+    # Each user is created in its own transaction and duplicates are tolerated,
+    # so concurrent/repeated initialization (e.g. multiple app startups) cannot
+    # raise a UNIQUE-constraint error on users.username.
+    sample_users = [
+        ("admin", "admin@example.com", "admin123", "Admin"),
+        ("researcher", "researcher@example.com", "researcher123", "Researcher"),
+    ]
+
     try:
-        # Create sample users
-        from app.services.auth import AuthService
-        
-        # Check if users already exist
-        existing_user = db.query(User).filter(User.username == "admin").first()
-        if not existing_user:
-            admin_user = User(
-                id=str(uuid.uuid4()),
-                username="admin",
-                email="admin@example.com",
-                hashed_password=AuthService.get_password_hash("admin123"),
-                role="Admin"
+        for username, email, password, role in sample_users:
+            if db.query(User).filter(User.username == username).first():
+                continue
+            db.add(
+                User(
+                    id=str(uuid.uuid4()),
+                    username=username,
+                    email=email,
+                    hashed_password=AuthService.get_password_hash(password),
+                    role=role,
+                )
             )
-            db.add(admin_user)
-            logger.info("Created admin user")
-        
-        existing_researcher = db.query(User).filter(User.username == "researcher").first()
-        if not existing_researcher:
-            researcher_user = User(
-                id=str(uuid.uuid4()),
-                username="researcher",
-                email="researcher@example.com",
-                hashed_password=AuthService.get_password_hash("researcher123"),
-                role="Researcher"
-            )
-            db.add(researcher_user)
-            logger.info("Created researcher user")
-        
-        db.commit()
+            try:
+                db.commit()
+                logger.info(f"Created {username} user")
+            except IntegrityError:
+                # Another process created this user concurrently — fine.
+                db.rollback()
+                logger.info(f"User '{username}' already exists; skipping.")
         logger.info("Sample users created successfully")
-        
-    except Exception as e:
-        logger.error(f"Error creating sample users: {e}")
-        db.rollback()
-        raise
-    
     finally:
         db.close()
 

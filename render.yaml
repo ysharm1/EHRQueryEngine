@@ -6,7 +6,11 @@ services:
     plan: standard  # Professional plan instance
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    startCommand: python -m app.init_db && uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 4
+    # Single worker: the warehouse is a single-file DuckDB on the mounted disk,
+    # and DuckDB allows only one writer process. Multiple workers cause
+    # "Conflicting lock" errors. Scale via a client/server DB (e.g. Postgres)
+    # rather than more workers.
+    startCommand: python -m app.init_db && uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
     envVars:
       - key: JWT_SECRET_KEY
         generateValue: true
