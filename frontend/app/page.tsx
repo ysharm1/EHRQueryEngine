@@ -10,7 +10,7 @@ export default function Home() {
     // Check if already logged in
     const token = localStorage.getItem('access_token');
     if (token) {
-      router.replace('/dashboard');
+      router.replace('/overview');
     } else {
       router.replace('/login');
     }
