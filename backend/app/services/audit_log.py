@@ -283,6 +283,41 @@ class AuditLogService:
             user_agent=user_agent,
         )
 
+    def log_warehouse_ingestion(
+        self,
+        user_id: Optional[str],
+        job_id: str,
+        source_id: str,
+        target_table: str,
+        record_count: int,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> str:
+        """Log the ingestion of a finalized de-identification job into the warehouse.
+
+        Records the user_id, timestamp (stamped by ``_create_log_entry``), the
+        originating job_id, the source_id (clinic/tenant), the target table, and
+        the count of Ingested_Records written, with a SHA-256 integrity checksum.
+
+        Implements Requirement 5.4
+        """
+        details = {
+            "job_id": job_id,
+            "source_id": source_id,
+            "target_table": target_table,
+            "record_count": record_count,
+            "action_type": "warehouse_ingest",
+        }
+
+        return self._create_log_entry(
+            user_id=user_id,
+            action="warehouse_ingest",
+            details=details,
+            status="success",
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+
     def _create_log_entry(
         self,
         user_id: Optional[str],

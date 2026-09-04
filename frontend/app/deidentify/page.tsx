@@ -8,6 +8,7 @@ import type {
   DeidResponse,
   DeidRedaction,
   DeidReviewDecision,
+  DeidIngestResponse,
 } from '@/types';
 
 type InputMode = 'paste' | 'upload';
@@ -66,6 +67,10 @@ export default function DeidentifyPage() {
   const [downloading, setDownloading] = useState(false);
   const [certError, setCertError] = useState<string | null>(null);
 
+  const [ingesting, setIngesting] = useState(false);
+  const [ingestError, setIngestError] = useState<string | null>(null);
+  const [ingestResult, setIngestResult] = useState<DeidIngestResponse | null>(null);
+
   const flagged: DeidRedaction[] = useMemo(
     () => result?.report.low_confidence ?? [],
     [result]
@@ -83,6 +88,8 @@ export default function DeidentifyPage() {
     setDecisions({});
     setReviewError(null);
     setCertError(null);
+    setIngestError(null);
+    setIngestResult(null);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -166,6 +173,21 @@ export default function DeidentifyPage() {
       setCertError('Could not download the certificate. Please try again.');
     } finally {
       setDownloading(false);
+    }
+  };
+
+  const handleIngest = async () => {
+    // Ingestion is only permitted once a job is finalized (Req 5.1).
+    if (!result || !isFinalized || ingesting) return;
+    setIngesting(true);
+    setIngestError(null);
+    try {
+      const response = await deidentifyService.ingest(result.job_id);
+      setIngestResult(response);
+    } catch {
+      setIngestError('Could not ingest the job into the warehouse. Please try again.');
+    } finally {
+      setIngesting(false);
     }
   };
 
@@ -435,6 +457,64 @@ export default function DeidentifyPage() {
                       </button>
                     </div>
                     {certError && <p className="mt-3 text-sm text-red-700">{certError}</p>}
+                  </div>
+                )}
+
+                {/* Warehouse ingestion (Req 5.1) — only available for a finalized job */}
+                {isFinalized && (
+                  <div
+                    data-testid="ingest-panel"
+                    className="rounded-lg border border-blue-200 bg-blue-50 p-5 shadow-sm"
+                  >
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-900">
+                          Ingest into warehouse
+                        </h3>
+                        <p className="mt-0.5 text-xs text-gray-600">
+                          Add this de-identified note to the queryable warehouse so it becomes
+                          searchable through clinical query and cohort search.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleIngest}
+                        disabled={ingesting}
+                        className="shrink-0 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {ingesting ? 'Ingesting…' : 'Ingest into warehouse'}
+                      </button>
+                    </div>
+
+                    {ingestResult && (
+                      <div
+                        data-testid="ingest-result"
+                        className="mt-4 rounded-md border border-blue-100 bg-white p-4"
+                      >
+                        <p className="text-sm font-medium text-gray-900">
+                          {ingestResult.ingested
+                            ? 'Ingested into the warehouse.'
+                            : 'Already ingested — the warehouse is unchanged.'}
+                        </p>
+                        <p className="mt-1 text-xs text-gray-600">
+                          Table: <span className="font-mono">{ingestResult.table}</span> · Source:{' '}
+                          <span className="font-mono">{ingestResult.source_id}</span>
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {ingestResult.record_ids.map((id) => (
+                            <span
+                              key={id}
+                              data-testid="ingest-record-id"
+                              className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 font-mono text-xs font-medium text-blue-800"
+                            >
+                              {id}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {ingestError && <p className="mt-3 text-sm text-red-700">{ingestError}</p>}
                   </div>
                 )}
               </div>

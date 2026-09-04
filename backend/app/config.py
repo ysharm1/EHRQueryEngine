@@ -15,6 +15,10 @@ class Settings(BaseSettings):
 
     duckdb_path: str = "/tmp/warehouse.duckdb"
 
+    # Warehouse ingestion — source (clinic/tenant) attribution for de-identified
+    # records ingested into the warehouse. Overridable via env var.
+    default_source_id: str = "default-clinic"
+
     # Authentication
     jwt_secret_key: str = "demo-secret-key-change-in-production-please-use-setup-sh"
     jwt_algorithm: str = "HS256"

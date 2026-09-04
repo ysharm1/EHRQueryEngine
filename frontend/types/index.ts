@@ -312,3 +312,15 @@ export interface DeidCertificate {
   finalized_at: string | null;
   integrity_checksum: string;
 }
+
+export interface DeidIngestRequest {
+  source_id?: string;
+}
+
+export interface DeidIngestResponse {
+  job_id: string;
+  source_id: string;
+  table: string; // "clinical_notes"
+  record_ids: string[];
+  ingested: boolean; // false on an idempotent no-op repeat
+}

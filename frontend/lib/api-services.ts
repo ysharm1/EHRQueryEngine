@@ -23,6 +23,7 @@ import type {
   DeidReviewResponse,
   DeidFinalizeResponse,
   DeidCertificate,
+  DeidIngestResponse,
 } from '@/types';
 
 // Authentication services
@@ -236,6 +237,14 @@ export const deidentifyService = {
 
   getCertificate: async (jobId: string): Promise<DeidCertificate> => {
     const response = await apiClient.get<DeidCertificate>(`/api/deidentify/report/${jobId}`);
+    return response.data;
+  },
+
+  ingest: async (jobId: string, sourceId?: string): Promise<DeidIngestResponse> => {
+    const response = await apiClient.post<DeidIngestResponse>(
+      `/api/deidentify/jobs/${jobId}/ingest`,
+      sourceId ? { source_id: sourceId } : {}
+    );
     return response.data;
   },
 };

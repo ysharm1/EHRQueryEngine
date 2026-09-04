@@ -316,3 +316,140 @@ def test_unauthenticated_request_is_401(tmp_path, monkeypatch):
             headers={"Authorization": "Bearer invalid-token"},
         )
     assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# POST /api/deidentify/jobs/{job_id}/ingest — Req 2.4, 3.2, 5.1, 5.2, 5.3, 6.3
+# ---------------------------------------------------------------------------
+
+from app.database import get_duckdb_connection
+from app.services import deid_repository as repo
+from app.services.extraction_schema import init_extraction_tables
+from app.services.schema_migration import run_clinical_schema_migration
+
+
+def _seed_warehouse_tables(conn):
+    """Create the deid + clinical warehouse tables in the isolated DuckDB."""
+    repo.init_deid_tables(conn)
+    init_extraction_tables(conn)
+    run_clinical_schema_migration(conn)
+
+
+def _seed_job(*, job_id, status, deidentified_text="patient seen today", source_ref="note.txt"):
+    """Persist a job (finalized or not) into the test warehouse and set up tables.
+
+    A finalized job is inserted as ``needs_review`` then finalized, mirroring the
+    real workflow (and the property-test helper).
+    """
+    conn = get_duckdb_connection()
+    try:
+        _seed_warehouse_tables(conn)
+        repo.insert_job(
+            conn,
+            job_id=job_id,
+            user_id="test-user",
+            source_type="text",
+            source_ref=source_ref,
+            status="needs_review" if status == "deidentified" else status,
+            total_redactions=0,
+            category_counts={},
+            deidentified_text=deidentified_text,
+            redactions=[],
+        )
+        if status == "deidentified":
+            repo.finalize_job(
+                conn,
+                job_id=job_id,
+                status="deidentified",
+                reviewer_id="reviewer-1",
+                deidentified_text=deidentified_text,
+            )
+    finally:
+        conn.close()
+
+
+def test_ingest_finalized_job_happy_path(client):
+    """A finalized job ingests into the warehouse (Req 5.1)."""
+    _seed_job(job_id="job-ingest-1", status="deidentified",
+              deidentified_text="patient is stable")
+
+    resp = client.post("/api/deidentify/jobs/job-ingest-1/ingest", json={})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["job_id"] == "job-ingest-1"
+    assert body["table"] == "clinical_notes"
+    assert body["source_id"] == "default-clinic"  # settings.default_source_id
+    assert body["record_ids"] == ["deid-note:job-ingest-1"]
+    assert body["ingested"] is True
+
+
+def test_ingest_supplied_source_id(client):
+    """A supplied source_id is passed through to the ingestor (Req 5.5)."""
+    _seed_job(job_id="job-ingest-src", status="deidentified")
+
+    resp = client.post(
+        "/api/deidentify/jobs/job-ingest-src/ingest",
+        json={"source_id": "clinic-42"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["source_id"] == "clinic-42"
+
+
+def test_ingest_needs_review_job_returns_409(client):
+    """Ingesting a non-finalized job is rejected with 409 (Req 2.4)."""
+    _seed_job(job_id="job-needs-review", status="needs_review")
+
+    resp = client.post("/api/deidentify/jobs/job-needs-review/ingest", json={})
+    assert resp.status_code == 409
+
+
+def test_ingest_unknown_job_returns_404(client):
+    """Ingesting an unknown job returns 404 (Req 5.3)."""
+    # Ensure the warehouse tables exist so the route reaches the get_job check.
+    conn = get_duckdb_connection()
+    try:
+        _seed_warehouse_tables(conn)
+    finally:
+        conn.close()
+
+    resp = client.post("/api/deidentify/jobs/does-not-exist/ingest", json={})
+    assert resp.status_code == 404
+
+
+def test_ingest_repeat_is_idempotent(client):
+    """A repeat ingestion returns ingested=False with the same ids (Req 6.3)."""
+    _seed_job(job_id="job-repeat", status="deidentified")
+
+    first = client.post("/api/deidentify/jobs/job-repeat/ingest", json={})
+    assert first.status_code == 200
+    assert first.json()["ingested"] is True
+    first_ids = first.json()["record_ids"]
+
+    second = client.post("/api/deidentify/jobs/job-repeat/ingest", json={})
+    assert second.status_code == 200
+    assert second.json()["ingested"] is False
+    assert second.json()["record_ids"] == first_ids
+
+
+def test_ingest_empty_deidentified_text(client):
+    """A job with empty de-identified text still ingests a note row."""
+    _seed_job(job_id="job-empty", status="deidentified", deidentified_text="")
+
+    resp = client.post("/api/deidentify/jobs/job-empty/ingest", json={})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ingested"] is True
+    assert body["record_ids"] == ["deid-note:job-empty"]
+
+
+def test_ingest_unauthenticated_is_401(tmp_path, monkeypatch):
+    """An unauthenticated ingest request is rejected by get_current_user (Req 5.2)."""
+    monkeypatch.setattr(settings, "duckdb_path", str(tmp_path / "test.duckdb"))
+    app.dependency_overrides.pop(get_current_user, None)
+    with TestClient(app) as test_client:
+        resp = test_client.post(
+            "/api/deidentify/jobs/whatever/ingest",
+            json={},
+            headers={"Authorization": "Bearer invalid-token"},
+        )
+    assert resp.status_code == 401

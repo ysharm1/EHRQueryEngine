@@ -14,6 +14,7 @@ vi.mock('@/lib/api-services', () => ({
     submitReview: vi.fn(),
     finalize: vi.fn(),
     getCertificate: vi.fn(),
+    ingest: vi.fn(),
   },
 }));
 
@@ -117,6 +118,55 @@ describe('DeidentifyPage', () => {
     ).toBeInTheDocument();
     // No review panel when nothing is flagged.
     expect(screen.queryByTestId('review-panel')).not.toBeInTheDocument();
+  });
+
+  it('shows the ingest control for a finalized job and ingests into the warehouse (Req 5.1)', async () => {
+    mockedService.deidentifyText.mockResolvedValue(finalizedResponse);
+    mockedService.ingest.mockResolvedValue({
+      job_id: 'job-2',
+      source_id: 'default-clinic',
+      table: 'clinical_notes',
+      record_ids: ['deid-note:job-2'],
+      ingested: true,
+    });
+    render(<DeidentifyPage />);
+
+    fireEvent.change(screen.getByLabelText('Text to de-identify'), {
+      target: { value: 'Contact a@b.com for details.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'De-identify' }));
+
+    // The ingest control appears alongside the certificate download for a
+    // finalized job.
+    const ingestButton = await screen.findByRole('button', {
+      name: 'Ingest into warehouse',
+    });
+    expect(ingestButton).toBeInTheDocument();
+
+    fireEvent.click(ingestButton);
+
+    await waitFor(() => {
+      expect(mockedService.ingest).toHaveBeenCalledWith('job-2');
+    });
+
+    // The returned record ids and newly-ingested state are surfaced.
+    expect(await screen.findByTestId('ingest-result')).toBeInTheDocument();
+    expect(screen.getByTestId('ingest-record-id')).toHaveTextContent('deid-note:job-2');
+  });
+
+  it('does not show the ingest control for a job that still needs review (Req 5.1)', async () => {
+    mockedService.deidentifyText.mockResolvedValue(needsReviewResponse);
+    render(<DeidentifyPage />);
+
+    fireEvent.change(screen.getByLabelText('Text to de-identify'), {
+      target: { value: 'Patient John seen on 01/15/2023.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'De-identify' }));
+
+    await screen.findByTestId('review-panel');
+    expect(
+      screen.queryByRole('button', { name: 'Ingest into warehouse' })
+    ).not.toBeInTheDocument();
   });
 
   it('submits review decisions then finalizes and reveals the certificate download', async () => {

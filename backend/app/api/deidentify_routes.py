@@ -57,6 +57,7 @@ from app.services.deidentifier import (
     _YEAR_PATTERN,
 )
 from app.services.pdf_parser import PDFParser
+from app.services.warehouse_ingestor import WarehouseIngestor
 
 router = APIRouter(prefix="/deidentify", tags=["deidentify"])
 
@@ -167,6 +168,18 @@ class CertificateOut(BaseModel):
     reviewer_id: Optional[str]
     finalized_at: Optional[str]
     integrity_checksum: str
+
+
+class IngestRequest(BaseModel):
+    source_id: Optional[str] = None  # Req 5.5; defaults to settings.default_source_id
+
+
+class IngestResponse(BaseModel):
+    job_id: str
+    source_id: str
+    table: str  # "clinical_notes"
+    record_ids: list[str]
+    ingested: bool  # False on an idempotent no-op repeat (Req 6.3)
 
 
 _VALID_REVIEW_ACTIONS = {"approve", "reject", "edit"}
@@ -551,8 +564,60 @@ async def finalize_deid_job(
     )
 
 
+@router.post("/jobs/{job_id}/ingest", response_model=IngestResponse)
+async def ingest_deid_job(
+    job_id: str,
+    request: IngestRequest,
+    req: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Ingest a finalized job's de-identified content into the warehouse (Req 5.1).
+
+    404 when the job is unknown (Req 5.3); 409 when it is not finalized
+    (Req 2.4). Idempotent: a repeat ingestion responds successfully with the
+    existing record ids and ``ingested=False`` (Req 6.3).
+    """
+    conn = get_duckdb_connection()
+    try:
+        repo.init_deid_tables(conn)
+        ingestor = WarehouseIngestor(settings.default_source_id)
+        ingestor.init_tables(conn)
+
+        job = repo.get_job(conn, job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail=f"Job {job_id!r} not found")
+
+        # The certificate build enforces the de-identified-only gate (Req 2.4):
+        # it raises JobNotFinalizedError for any non-finalized job before ingest.
+        try:
+            certificate = repo.build_certificate(job)
+        except JobNotFinalizedError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+
+        result = ingestor.ingest_job(
+            conn,
+            job=job,
+            certificate=certificate,
+            source_id=request.source_id,
+            ingested_by=current_user.id,
+        )
+    finally:
+        conn.close()
+
+    _audit_ingest(db, current_user, req, result)  # Req 5.4
+
+    return IngestResponse(
+        job_id=result.job_id,
+        source_id=result.source_id,
+        table=result.table,
+        record_ids=result.record_ids,
+        ingested=not result.already_ingested,
+    )
+
+
 # ---------------------------------------------------------------------------
-# Audit logging (Req 7.1, 7.2) — never blocks the primary response.
+# Audit logging (Req 7.1, 7.2, 5.4) — never blocks the primary response.
 # ---------------------------------------------------------------------------
 
 def _audit_deidentify(
@@ -606,3 +671,27 @@ def _audit_finalize(
         import logging
 
         logging.getLogger(__name__).exception("Failed to write finalize audit log")
+
+
+def _audit_ingest(
+    db: Session,
+    current_user: User,
+    req: Optional[Request],
+    result,
+) -> None:
+    """Record a warehouse-ingestion audit entry (Req 5.4). Best-effort."""
+    try:
+        audit = AuditLogService(db)
+        audit.log_warehouse_ingestion(
+            user_id=current_user.id,
+            job_id=result.job_id,
+            source_id=result.source_id,
+            target_table=result.table,
+            record_count=len(result.record_ids),
+            ip_address=req.client.host if req and req.client else None,
+            user_agent=req.headers.get("user-agent") if req else None,
+        )
+    except Exception:  # pragma: no cover - audit must not break the response
+        import logging
+
+        logging.getLogger(__name__).exception("Failed to write ingest audit log")
